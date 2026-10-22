@@ -673,112 +673,84 @@ export async function POST(req: NextRequest) {
 
     let demographics = buildHeuristicDemographics(resolvedName, radiusKm, poiCounts);
 
-    // 3. NẾU CÓ GEMINI API KEY -> GỌI GOOGLE SEARCH GROUNDING ĐỂ RESEARCH SÂU DÂN CƯ & TIN TỨC ĐỊA PHƯƠNG
+    // 3. NẾU CÓ GEMINI API KEY -> GỌI GEMINI ĐỂ PHÂN TÍCH NHÂN KHẨU HỌC & TIỀM NĂNG ĐỊA PHƯƠNG (CÓ TIMEOUT AN TOÀN 6.5 GIÂY)
     if (effectiveGeminiKey) {
       try {
         const client = new GoogleGenAI({ apiKey: effectiveGeminiKey });
         const poiListText = pois
-          .slice(0, 15)
+          .slice(0, 12)
           .map((p) => `- ${p.name} (${p.subType}, cách ${p.distanceMeters}m)`)
           .join('\n');
 
-        const prompt = `Hãy sử dụng Google Search để phân tích nhân khẩu học, kinh tế địa phương và tệp khách hàng tiềm năng nhất tại khu vực:
+        const prompt = `Phân tích nhân khẩu học, kinh tế địa phương và tệp khách hàng tiềm năng nhất tại khu vực:
 - Địa điểm: "${resolvedName}" (Tọa độ: ${lat.toFixed(4)}, ${lng.toFixed(4)}, Bán kính khảo sát: ${radiusKm} km)
 - Các địa điểm (POIs) thực tế vừa quét được trong bán kính ${radiusKm}km:
 ${poiListText}
 
-Hãy nghiên cứu:
-1. Quy mô dân số, mật độ cư dân và đặc điểm hộ gia đình tại phường/quận này.
-2. Thu nhập bình quân đầu người / mức chi tiêu hộ gia đình và ngành nghề thu nhập chính tại địa phương.
-3. Tin tức quy hoạch, dự án chung cư/trường học/thương mại hoặc tiềm năng kinh doanh tại khu vực này.
-4. Chấm điểm mức độ dồi dào (0-100) cho 8 nhóm khách hàng (infant, toddler, school, student, young_family, middle_age, senior, pet), 3 phân khúc giá (budget, mid, premium) và 6 nhu cầu Maslow (eat, live, wear, play, grow, community).`;
+Trả về duy nhất 1 JSON object (không bọc markdown) theo cấu trúc:
+{
+  "populationDensity": "Mô tả mật độ dân số khu vực này",
+  "estimatedPopulationInRadius": ${demographics.estimatedPopulationInRadius},
+  "avgMonthlyIncomeVND": "Mức thu nhập bình quân đầu người/hộ gia đình tại đây",
+  "dominantOccupations": ["Ngành nghề/nhóm cư dân 1", "Nhóm cư dân 2", "Nhóm cư dân 3"],
+  "spendingBehavior": "Đặc điểm chi tiêu của cư dân địa phương",
+  "localNewsAndPotential": ["Điểm nhấn hạ tầng/quy hoạch 1", "Tiềm năng kinh doanh 2", "Xu hướng tiêu dùng 3"],
+  "topCustomerSummary": "Tóm tắt tệp khách hàng vàng tại khu vực này"
+}`;
 
-        const schema = {
-          type: 'object',
-          properties: {
-            populationDensity: { type: 'string' },
-            estimatedPopulationInRadius: { type: 'number' },
-            avgMonthlyIncomeVND: { type: 'string' },
-            dominantOccupations: { type: 'array', items: { type: 'string' } },
-            spendingBehavior: { type: 'string' },
-            localNewsAndPotential: { type: 'array', items: { type: 'string' } },
-            ageSegmentScores: {
-              type: 'object',
-              properties: {
-                infant: { type: 'number' },
-                toddler: { type: 'number' },
-                school: { type: 'number' },
-                student: { type: 'number' },
-                young_family: { type: 'number' },
-                middle_age: { type: 'number' },
-                senior: { type: 'number' },
-                pet: { type: 'number' },
-              },
-              required: [
-                'infant',
-                'toddler',
-                'school',
-                'student',
-                'young_family',
-                'middle_age',
-                'senior',
-                'pet',
-              ],
-            },
-            priceTierFit: {
-              type: 'object',
-              properties: {
-                budget: { type: 'number' },
-                mid: { type: 'number' },
-                premium: { type: 'number' },
-              },
-              required: ['budget', 'mid', 'premium'],
-            },
-            needDemandScores: {
-              type: 'object',
-              properties: {
-                eat: { type: 'number' },
-                live: { type: 'number' },
-                wear: { type: 'number' },
-                play: { type: 'number' },
-                grow: { type: 'number' },
-                community: { type: 'number' },
-              },
-              required: ['eat', 'live', 'wear', 'play', 'grow', 'community'],
-            },
-            topCustomerSummary: { type: 'string' },
-          },
-          required: [
-            'populationDensity',
-            'estimatedPopulationInRadius',
-            'avgMonthlyIncomeVND',
-            'dominantOccupations',
-            'spendingBehavior',
-            'localNewsAndPotential',
-            'ageSegmentScores',
-            'priceTierFit',
-            'needDemandScores',
-            'topCustomerSummary',
-          ],
-        };
-
-        const interaction = await client.interactions.create({
+        const aiPromise = client.interactions.create({
           model: 'gemini-3.8-flash',
           input: prompt,
-          tools: [{ type: 'google_search' }],
-          response_format: {
-            type: 'text',
-            mime_type: 'application/json',
-            schema,
-          },
         });
+        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 6500));
+        const interaction = await Promise.race([aiPromise, timeoutPromise]);
 
-        if (interaction.output_text) {
-          const parsed = JSON.parse(interaction.output_text);
-          demographics = {
-            ...parsed,
-            citations: demographics.citations,
-          };
+        if (interaction && interaction.output_text) {
+          const cleaned = interaction.output_text
+            .replace(/^```json\s*/i, '')
+            .replace(/^```\s*/i, '')
+            .replace(/\s*```$/i, '')
+            .trim();
+          const firstBrace = cleaned.indexOf('{');
+          const lastBrace = cleaned.lastIndexOf('}');
+          const jsonStr =
+            firstBrace !== -1 && lastBrace > firstBrace
+              ? cleaned.slice(firstBrace, lastBrace + 1)
+              : cleaned;
+          const parsed = JSON.parse(jsonStr);
+          if (parsed && typeof parsed === 'object') {
+            demographics = {
+              ...demographics,
+              populationDensity:
+                typeof parsed.populationDensity === 'string' && parsed.populationDensity
+                  ? parsed.populationDensity
+                  : demographics.populationDensity,
+              estimatedPopulationInRadius:
+                Number(parsed.estimatedPopulationInRadius) ||
+                demographics.estimatedPopulationInRadius,
+              avgMonthlyIncomeVND:
+                typeof parsed.avgMonthlyIncomeVND === 'string' && parsed.avgMonthlyIncomeVND
+                  ? parsed.avgMonthlyIncomeVND
+                  : demographics.avgMonthlyIncomeVND,
+              dominantOccupations:
+                Array.isArray(parsed.dominantOccupations) && parsed.dominantOccupations.length > 0
+                  ? parsed.dominantOccupations.map(String)
+                  : demographics.dominantOccupations,
+              spendingBehavior:
+                typeof parsed.spendingBehavior === 'string' && parsed.spendingBehavior
+                  ? parsed.spendingBehavior
+                  : demographics.spendingBehavior,
+              localNewsAndPotential:
+                Array.isArray(parsed.localNewsAndPotential) &&
+                parsed.localNewsAndPotential.length > 0
+                  ? parsed.localNewsAndPotential.map(String)
+                  : demographics.localNewsAndPotential,
+              topCustomerSummary:
+                typeof parsed.topCustomerSummary === 'string' && parsed.topCustomerSummary
+                  ? parsed.topCustomerSummary
+                  : demographics.topCustomerSummary,
+            };
+          }
         }
       } catch (aiErr) {
         console.error('Gemini Area Research fallback used:', aiErr);

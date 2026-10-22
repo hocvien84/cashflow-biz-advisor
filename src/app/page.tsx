@@ -75,6 +75,7 @@ export default function CashflowBizAdvisorApp() {
   const [researchTier, setResearchTier] = useState<PriceTierId>('mid');
   const [researchCustomText, setResearchCustomText] = useState<string>('');
   const [isResearchingModel, setIsResearchingModel] = useState<boolean>(false);
+  const [researchFeedback, setResearchFeedback] = useState<string>('');
 
   // 2. State: Location & Area Intelligence
   const [lat, setLat] = useState<number>(PRESET_LOCATIONS[0].lat);
@@ -241,16 +242,19 @@ export default function CashflowBizAdvisorApp() {
     );
   };
 
-  const handleAiModelResearch = async () => {
-    if (researchAges.length === 0 || researchNeeds.length === 0) return;
+  const handleAiModelResearch = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const targetAges: AgeSegmentId[] = researchAges.length > 0 ? researchAges : [selectedAge];
+    const targetNeeds: MaslowNeedId[] = researchNeeds.length > 0 ? researchNeeds : [selectedNeed];
     setIsResearchingModel(true);
+    setResearchFeedback('⏳ Đang phân tích thị trường Châu Á & bóc tách P&L...');
     try {
       const res = await fetch('/api/models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ageSegments: researchAges,
-          maslowNeeds: researchNeeds,
+          ageSegments: targetAges,
+          maslowNeeds: targetNeeds,
           priceTier: researchTier,
           customPrompt: researchCustomText,
           apiKey: geminiApiKey,
@@ -259,12 +263,18 @@ export default function CashflowBizAdvisorApp() {
       const data = await res.json();
       if (data.model) {
         setModels((prev) => [data.model, ...prev]);
+        setSelectedTierFilter('all');
+        setShowMultiNeedOnly(false);
+        setSelectedAge(targetAges[0]);
+        setSelectedNeed(targetNeeds[0]);
         setActiveModelDetail(data.model);
-        setSelectedAge(researchAges[0]);
-        setSelectedNeed(researchNeeds[0]);
+        setResearchFeedback(`✅ Đã tạo & lưu thành công mô hình: "${data.model.name}"! Xem chi tiết P&L ngay bên trái.`);
+      } else {
+        setResearchFeedback(`⚠️ Không thể tạo mô hình: ${data.error || 'Vui lòng thử lại'}`);
       }
-    } catch (e) {
-      console.error('AI Model research error:', e);
+    } catch (err) {
+      console.error('AI Model research error:', err);
+      setResearchFeedback('⚠️ Có lỗi kết nối khi gọi AI Research, vui lòng bấm thử lại.');
     } finally {
       setIsResearchingModel(false);
     }
@@ -581,8 +591,15 @@ export default function CashflowBizAdvisorApp() {
 
             {/* SELECTED CELL DETAILS & MODELS */}
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-              {/* Left 2 columns: Models in selected cell */}
+              {/* Left 2 columns: Active P&L Simulator (on top when selected) + Models in selected cell */}
               <div className="xl:col-span-2 space-y-4">
+                {activeModelDetail && (
+                  <PnLSimulatorCard
+                    model={activeModelDetail}
+                    onClose={() => setActiveModelDetail(null)}
+                  />
+                )}
+
                 <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
                     <div>
@@ -685,14 +702,6 @@ export default function CashflowBizAdvisorApp() {
                     </div>
                   )}
                 </div>
-
-                {/* Active Model P&L Simulator View */}
-                {activeModelDetail && (
-                  <PnLSimulatorCard
-                    model={activeModelDetail}
-                    onClose={() => setActiveModelDetail(null)}
-                  />
-                )}
               </div>
 
               {/* Right 1 column: AI Deep Market Research Generator (Multi-need & P&L) */}
@@ -782,36 +791,44 @@ export default function CashflowBizAdvisorApp() {
                   </div>
 
                   {/* Optional specific idea */}
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-300">
-                      4. Ý tưởng / Ngách cụ thể muốn AI đào sâu BCTC & P&L (Tùy chọn):
-                    </label>
-                    <input
-                      type="text"
-                      value={researchCustomText}
-                      onChange={(e) => setResearchCustomText(e.target.value)}
-                      placeholder="VD: Chuỗi bánh ăn dặm & sữa hạt cho bé, Trạm sạc + Cafe..."
-                      className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                    />
-                  </div>
+                  <form onSubmit={handleAiModelResearch} className="space-y-3">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-slate-300">
+                        4. Ý tưởng / Ngách cụ thể muốn AI đào sâu BCTC & P&L (Nhấn Enter hoặc bấm nút):
+                      </label>
+                      <input
+                        type="text"
+                        value={researchCustomText}
+                        onChange={(e) => setResearchCustomText(e.target.value)}
+                        placeholder="VD: Chuỗi bánh ăn dặm & sữa hạt cho bé, Trạm sạc + Cafe..."
+                        className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
 
-                  <button
-                    onClick={handleAiModelResearch}
-                    disabled={isResearchingModel}
-                    className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition disabled:opacity-50"
-                  >
-                    {isResearchingModel ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Đang Research Thị Trường Châu Á & Bóc Tách P&L...
-                      </>
-                    ) : (
-                      <>
-                        <PlusCircle className="w-4 h-4" />
-                        Research & Lưu Mô Hình Vào Database
-                      </>
+                    <button
+                      type="submit"
+                      disabled={isResearchingModel}
+                      className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer"
+                    >
+                      {isResearchingModel ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Đang Research Thị Trường Châu Á & Bóc Tách P&L...
+                        </>
+                      ) : (
+                        <>
+                          <PlusCircle className="w-4 h-4" />
+                          Research & Lưu Mô Hình Vào Database
+                        </>
+                      )}
+                    </button>
+
+                    {researchFeedback && (
+                      <div className="p-3 rounded-xl bg-emerald-950/50 border border-emerald-500/40 text-xs text-emerald-200 font-medium leading-relaxed">
+                        {researchFeedback}
+                      </div>
                     )}
-                  </button>
+                  </form>
                 </div>
 
                 {/* Highlight Multi-need Exemplars */}
@@ -1063,8 +1080,8 @@ export default function CashflowBizAdvisorApp() {
                             {item.locationName}
                           </div>
                           <div className="text-[10px] text-slate-400">
-                            Bán kính {item.radiusKm}km • {item.pois.length} điểm POI • Dân số ~
-                            {item.demographics.estimatedPopulationInRadius.toLocaleString('vi-VN')}
+                            Bán kính {item.radiusKm}km • {(item.pois || []).length} điểm POI • Dân số ~
+                            {Number(item.demographics?.estimatedPopulationInRadius || 25000).toLocaleString('vi-VN')}
                           </div>
                         </div>
                         <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/15 text-emerald-300 shrink-0">
@@ -1099,7 +1116,7 @@ export default function CashflowBizAdvisorApp() {
                               className="text-lg font-bold mt-0.5"
                               style={{ color: POI_CATEGORY_META[cat].color }}
                             >
-                              {areaData.poiCounts[cat] || 0} điểm
+                              {areaData.poiCounts?.[cat] || 0} điểm
                             </div>
                           </div>
                         ))}
@@ -1114,29 +1131,29 @@ export default function CashflowBizAdvisorApp() {
                       </h3>
 
                       <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 font-medium">
-                        🏆 {areaData.demographics.topCustomerSummary}
+                        🏆 {areaData.demographics?.topCustomerSummary}
                       </div>
 
                       <div className="space-y-2 text-xs">
                         <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
                           <span className="text-slate-400">Mật độ & Quy mô dân số bán kính {areaData.radiusKm}km:</span>
                           <div className="font-semibold text-white mt-0.5">
-                            ~{areaData.demographics.estimatedPopulationInRadius.toLocaleString('vi-VN')} cư dân —{' '}
-                            {areaData.demographics.populationDensity}
+                            ~{Number(areaData.demographics?.estimatedPopulationInRadius || 25000).toLocaleString('vi-VN')} cư dân —{' '}
+                            {areaData.demographics?.populationDensity}
                           </div>
                         </div>
 
                         <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
                           <span className="text-slate-400">Thu nhập bình quân & Sức mua:</span>
                           <div className="font-semibold text-emerald-300 mt-0.5">
-                            {areaData.demographics.avgMonthlyIncomeVND}
+                            {areaData.demographics?.avgMonthlyIncomeVND}
                           </div>
                         </div>
 
                         <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
                           <span className="text-slate-400">Ngành nghề & Tầng lớp cư dân chính:</span>
                           <div className="flex flex-wrap gap-1.5 mt-1">
-                            {areaData.demographics.dominantOccupations.map((occ, i) => (
+                            {(areaData.demographics?.dominantOccupations || []).map((occ, i) => (
                               <span
                                 key={i}
                                 className="px-2 py-0.5 rounded bg-slate-800 text-slate-200 text-[11px]"
@@ -1150,10 +1167,10 @@ export default function CashflowBizAdvisorApp() {
                         <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
                           <span className="text-slate-400">Hành vi chi tiêu & Tin tức tiềm năng địa phương:</span>
                           <p className="text-slate-200 mt-1 leading-relaxed">
-                            {areaData.demographics.spendingBehavior}
+                            {areaData.demographics?.spendingBehavior}
                           </p>
                           <ul className="mt-1.5 space-y-1 text-slate-300 list-disc list-inside">
-                            {areaData.demographics.localNewsAndPotential.map((news, i) => (
+                            {(areaData.demographics?.localNewsAndPotential || []).map((news, i) => (
                               <li key={i}>{news}</li>
                             ))}
                           </ul>
@@ -1168,7 +1185,7 @@ export default function CashflowBizAdvisorApp() {
                       </h3>
                       <div className="space-y-2">
                         {AGE_SEGMENTS.map((seg) => {
-                          const score = areaData.demographics.ageSegmentScores[seg.id] || 60;
+                          const score = areaData.demographics?.ageSegmentScores?.[seg.id] || 60;
                           return (
                             <div key={seg.id} className="space-y-1">
                               <div className="flex justify-between text-xs">

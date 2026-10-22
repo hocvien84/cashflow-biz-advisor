@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { BusinessModel } from '@/types/business';
 import { AGE_SEGMENTS, MASLOW_NEEDS, PRICE_TIERS } from '@/data/matrix-constants';
 import {
@@ -22,23 +22,44 @@ interface PnLSimulatorCardProps {
 }
 
 export default function PnLSimulatorCard({ model, onClose }: PnLSimulatorCardProps) {
-  const defaultDailyOrders = Math.max(
-    10,
-    Math.round((model.pnl.avgMonthlyRevenueVND * 1000) / (30 * model.pnl.averageOrderValueVND))
-  );
-  const defaultRentMil = Math.round((model.pnl.avgMonthlyRevenueVND * model.pnl.rentPercent) / 100);
-  const defaultCapexMil = Math.round((model.pnl.initialCapexMinVND + model.pnl.initialCapexMaxVND) / 2);
+  const safeRev = Number(model?.pnl?.avgMonthlyRevenueVND) || 180;
+  const safeAov = Number(model?.pnl?.averageOrderValueVND) || 120;
+  const safeGrossPct = Number(model?.pnl?.grossMarginPercent) || 55;
+  const safeCogsPct = Number(model?.pnl?.cogsPercent) || 100 - safeGrossPct;
+  const safeRentPct = Number(model?.pnl?.rentPercent) || 13;
+  const safeLaborPct = Number(model?.pnl?.laborPercent) || 16;
+  const safeOpexPct = Number(model?.pnl?.opexMarketingPercent) || 10;
+  const safeNetPct =
+    Number(model?.pnl?.netMarginPercent) ||
+    Math.max(8, safeGrossPct - safeRentPct - safeLaborPct - safeOpexPct);
+  const safeCapexMin = Number(model?.pnl?.initialCapexMinVND) || 120;
+  const safeCapexMax = Number(model?.pnl?.initialCapexMaxVND) || 280;
+  const safePaybackMin = Number(model?.pnl?.paybackMonthsMin) || 6;
+  const safePaybackMax = Number(model?.pnl?.paybackMonthsMax) || 12;
+  const safeRepeatPct = Number(model?.pnl?.repeatRatePercent) || 75;
+
+  const defaultDailyOrders = Math.max(10, Math.round((safeRev * 1000) / (30 * safeAov)));
+  const defaultRentMil = Math.round((safeRev * safeRentPct) / 100);
+  const defaultCapexMil = Math.round((safeCapexMin + safeCapexMax) / 2);
 
   const [dailyOrders, setDailyOrders] = useState<number>(defaultDailyOrders);
-  const [aovThousand, setAovThousand] = useState<number>(model.pnl.averageOrderValueVND);
+  const [aovThousand, setAovThousand] = useState<number>(safeAov);
   const [monthlyRentMil, setMonthlyRentMil] = useState<number>(defaultRentMil);
   const [customCapexMil, setCustomCapexMil] = useState<number>(defaultCapexMil);
 
+  // Sync slider values when switching to a different model
+  useEffect(() => {
+    setDailyOrders(Math.max(10, Math.round((safeRev * 1000) / (30 * safeAov))));
+    setAovThousand(safeAov);
+    setMonthlyRentMil(Math.round((safeRev * safeRentPct) / 100));
+    setCustomCapexMil(Math.round((safeCapexMin + safeCapexMax) / 2));
+  }, [model?.id, safeRev, safeAov, safeRentPct, safeCapexMin, safeCapexMax]);
+
   // Calculations
   const simMonthlyRevMil = Math.round((dailyOrders * aovThousand * 30) / 1000);
-  const simGrossProfitMil = Math.round((simMonthlyRevMil * model.pnl.grossMarginPercent) / 100);
-  const simLaborMil = Math.round((simMonthlyRevMil * model.pnl.laborPercent) / 100);
-  const simOpexMil = Math.round((simMonthlyRevMil * model.pnl.opexMarketingPercent) / 100);
+  const simGrossProfitMil = Math.round((simMonthlyRevMil * safeGrossPct) / 100);
+  const simLaborMil = Math.round((simMonthlyRevMil * safeLaborPct) / 100);
+  const simOpexMil = Math.round((simMonthlyRevMil * safeOpexPct) / 100);
   const simNetProfitMil = simGrossProfitMil - monthlyRentMil - simLaborMil - simOpexMil;
   const simNetMarginPct =
     simMonthlyRevMil > 0 ? Math.round((simNetProfitMil / simMonthlyRevMil) * 100) : 0;
@@ -49,60 +70,69 @@ export default function PnLSimulatorCard({ model, onClose }: PnLSimulatorCardPro
       ? Math.round(((simNetProfitMil * 12) / customCapexMil) * 100)
       : 0;
 
-  // Điểm hòa vốn (số đơn/ngày để lợi nhuận gộp bù đắp chi phí cố định)
   const fixedCostMil = monthlyRentMil + Math.round(simLaborMil * 0.7) + Math.round(simOpexMil * 0.5);
-  const grossProfitPerOrderThousand = (aovThousand * model.pnl.grossMarginPercent) / 100;
+  const grossProfitPerOrderThousand = (aovThousand * safeGrossPct) / 100;
   const breakEvenDailyOrders =
     grossProfitPerOrderThousand > 0
       ? Math.ceil((fixedCostMil * 1000) / (30 * grossProfitPerOrderThousand))
       : 0;
 
-  const tierMeta = PRICE_TIERS.find((t) => t.id === model.priceTier);
+  const tierMeta = PRICE_TIERS.find((t) => t.id === model?.priceTier);
+  const safeProducts = Array.isArray(model?.productsAndServices) ? model.productsAndServices : [];
+  const safeExemplarsVN = Array.isArray(model?.exemplarsVN) ? model.exemplarsVN : [];
+  const safeExemplarsAsia = Array.isArray(model?.exemplarsAsia) ? model.exemplarsAsia : [];
+  const safeKSF = Array.isArray(model?.keySuccessFactors) ? model.keySuccessFactors : [];
+  const safeRisks = Array.isArray(model?.risks) ? model.risks : [];
+  const safeAges = Array.isArray(model?.ageSegments) ? model.ageSegments : [];
+  const safeNeeds = Array.isArray(model?.maslowNeeds) ? model.maslowNeeds : [];
 
   return (
-    <div className="bg-slate-900 border border-slate-700/90 rounded-2xl p-6 text-slate-100 shadow-2xl space-y-6">
+    <div className="bg-slate-900 border-2 border-indigo-500/70 rounded-2xl p-6 text-slate-100 shadow-2xl space-y-6">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 border-b border-slate-800 pb-4">
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            {model.isMultiNeed && (
+            {model?.isMultiNeed && (
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40">
                 <Layers className="w-3.5 h-3.5" /> Mô hình Đa Nhu Cầu (One-Stop-Shop)
               </span>
             )}
             {tierMeta && (
-              <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border ${tierMeta.badgeColor}`}>
+              <span
+                className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border ${tierMeta.badgeColor}`}
+              >
                 {tierMeta.label}
               </span>
             )}
-            {model.ageSegments.map((ag) => {
+            {safeAges.map((ag) => {
               const aMeta = AGE_SEGMENTS.find((a) => a.id === ag);
               return (
                 <span
                   key={ag}
                   className="px-2.5 py-0.5 rounded-full text-xs bg-indigo-500/20 text-indigo-300 border border-indigo-500/30"
                 >
-                  👥 {aMeta?.label} ({aMeta?.subLabel})
+                  👥 {aMeta?.label || ag} {aMeta?.subLabel ? `(${aMeta.subLabel})` : ''}
                 </span>
               );
             })}
-            {model.maslowNeeds.map((nd) => {
+            {safeNeeds.map((nd) => {
               const nMeta = MASLOW_NEEDS.find((n) => n.id === nd);
               return (
                 <span
                   key={nd}
                   className="px-2.5 py-0.5 rounded-full text-xs bg-amber-500/15 text-amber-300 border border-amber-500/30"
                 >
-                  🎯 {nMeta?.label}
+                  🎯 {nMeta?.label || nd}
                 </span>
               );
             })}
           </div>
-          <h3 className="text-xl md:text-2xl font-bold text-white">{model.name}</h3>
-          <p className="text-sm text-indigo-300 font-medium">{model.tagline}</p>
+          <h3 className="text-xl md:text-2xl font-bold text-white">{model?.name}</h3>
+          <p className="text-sm text-indigo-300 font-medium">{model?.tagline}</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button
+            type="button"
             onClick={() => window.print()}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition"
           >
@@ -110,10 +140,11 @@ export default function PnLSimulatorCard({ model, onClose }: PnLSimulatorCardPro
           </button>
           {onClose && (
             <button
+              type="button"
               onClick={onClose}
               className="px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-xs font-semibold border border-rose-500/30 transition"
             >
-              Đóng
+              Đóng ✕
             </button>
           )}
         </div>
@@ -125,9 +156,9 @@ export default function PnLSimulatorCard({ model, onClose }: PnLSimulatorCardPro
           <h4 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
             <Award className="w-4 h-4 text-amber-400" /> Bản chất Mô hình & Cấu trúc Sản phẩm Dòng tiền
           </h4>
-          <p className="text-xs md:text-sm text-slate-300 leading-relaxed">{model.summary}</p>
+          <p className="text-xs md:text-sm text-slate-300 leading-relaxed">{model?.summary}</p>
           <div className="space-y-1.5 pt-1">
-            {model.productsAndServices.map((prod, idx) => (
+            {safeProducts.map((prod, idx) => (
               <div key={idx} className="flex items-start gap-2 text-xs text-slate-200">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
                 <span>{prod}</span>
@@ -144,7 +175,7 @@ export default function PnLSimulatorCard({ model, onClose }: PnLSimulatorCardPro
           <div>
             <div className="text-xs text-slate-400 mb-1.5">Chuỗi / Mô hình tiêu biểu tại Việt Nam:</div>
             <div className="flex flex-wrap gap-1.5">
-              {model.exemplarsVN.map((ex, i) => (
+              {safeExemplarsVN.map((ex, i) => (
                 <span
                   key={i}
                   className="px-2.5 py-1 rounded-md text-xs font-medium bg-cyan-500/15 text-cyan-200 border border-cyan-500/30"
@@ -156,15 +187,20 @@ export default function PnLSimulatorCard({ model, onClose }: PnLSimulatorCardPro
           </div>
           <div className="space-y-2 pt-1">
             <div className="text-xs text-slate-400">Tham chiếu BCTC Doanh nghiệp Châu Á:</div>
-            {model.exemplarsAsia.map((asia, i) => (
-              <div key={i} className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-700/80 text-xs space-y-1">
+            {safeExemplarsAsia.map((asia, i) => (
+              <div
+                key={i}
+                className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-700/80 text-xs space-y-1"
+              >
                 <div className="flex items-center justify-between font-semibold text-amber-300">
-                  <span>🌏 {asia.name} ({asia.country})</span>
+                  <span>
+                    🌏 {asia?.name} ({asia?.country})
+                  </span>
                   <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-200 text-[11px]">
-                    {asia.tickerOrStatus}
+                    {asia?.tickerOrStatus}
                   </span>
                 </div>
-                <p className="text-slate-300 leading-relaxed">{asia.financialHighlight}</p>
+                <p className="text-slate-300 leading-relaxed">{asia?.financialHighlight}</p>
               </div>
             ))}
           </div>
@@ -177,81 +213,84 @@ export default function PnLSimulatorCard({ model, onClose }: PnLSimulatorCardPro
           <h4 className="text-sm font-semibold text-white flex items-center gap-2">
             <TrendingUp className="w-4 h-4 text-emerald-400" /> Cấu trúc P&L Chuẩn Ngành (% trên Doanh thu)
           </h4>
-          <span className="text-xs text-slate-400 italic">Nguồn: {model.pnl.dataSourceCitation}</span>
+          <span className="text-xs text-slate-400 italic">
+            Nguồn: {model?.pnl?.dataSourceCitation || 'BCTC các chuỗi bán lẻ & dịch vụ Châu Á'}
+          </span>
         </div>
 
         {/* Visual stacked bar */}
         <div className="w-full h-7 rounded-lg overflow-hidden flex text-[11px] font-bold">
           <div
-            style={{ width: `${model.pnl.cogsPercent}%` }}
+            style={{ width: `${safeCogsPct}%` }}
             className="bg-rose-500/80 text-white flex items-center justify-center"
-            title={`Giá vốn COGS: ${model.pnl.cogsPercent}%`}
+            title={`Giá vốn COGS: ${safeCogsPct}%`}
           >
-            COGS {model.pnl.cogsPercent}%
+            COGS {safeCogsPct}%
           </div>
           <div
-            style={{ width: `${model.pnl.rentPercent}%` }}
+            style={{ width: `${safeRentPct}%` }}
             className="bg-amber-500/80 text-slate-950 flex items-center justify-center"
-            title={`Thuê mặt bằng: ${model.pnl.rentPercent}%`}
+            title={`Thuê mặt bằng: ${safeRentPct}%`}
           >
-            Mặt bằng {model.pnl.rentPercent}%
+            MB {safeRentPct}%
           </div>
           <div
-            style={{ width: `${model.pnl.laborPercent}%` }}
+            style={{ width: `${safeLaborPct}%` }}
             className="bg-sky-500/80 text-slate-950 flex items-center justify-center"
-            title={`Nhân sự: ${model.pnl.laborPercent}%`}
+            title={`Nhân sự: ${safeLaborPct}%`}
           >
-            Nhân sự {model.pnl.laborPercent}%
+            NS {safeLaborPct}%
           </div>
           <div
-            style={{ width: `${model.pnl.opexMarketingPercent}%` }}
+            style={{ width: `${safeOpexPct}%` }}
             className="bg-purple-500/80 text-white flex items-center justify-center"
-            title={`Vận hành & MKT: ${model.pnl.opexMarketingPercent}%`}
+            title={`Vận hành & MKT: ${safeOpexPct}%`}
           >
-            OPEX {model.pnl.opexMarketingPercent}%
+            OPEX {safeOpexPct}%
           </div>
           <div
-            style={{ width: `${model.pnl.netMarginPercent}%` }}
+            style={{ width: `${safeNetPct}%` }}
             className="bg-emerald-500 text-slate-950 flex items-center justify-center"
-            title={`Lợi nhuận ròng: ${model.pnl.netMarginPercent}%`}
+            title={`Lợi nhuận ròng: ${safeNetPct}%`}
           >
-            Lãi ròng {model.pnl.netMarginPercent}%
+            Lãi {safeNetPct}%
           </div>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
           <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800">
             <div className="text-xs text-slate-400">Doanh thu chuẩn / tháng</div>
-            <div className="text-lg font-bold text-white mt-0.5">{model.pnl.avgMonthlyRevenueVND} Triệu</div>
-            <div className="text-[11px] text-emerald-400">Biên gộp: {model.pnl.grossMarginPercent}%</div>
+            <div className="text-lg font-bold text-white mt-0.5">{safeRev} Triệu</div>
+            <div className="text-[11px] text-emerald-400">Biên gộp: {safeGrossPct}%</div>
           </div>
           <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800">
             <div className="text-xs text-slate-400">Lợi nhuận ròng / tháng</div>
             <div className="text-lg font-bold text-emerald-400 mt-0.5">
-              ~{Math.round((model.pnl.avgMonthlyRevenueVND * model.pnl.netMarginPercent) / 100)} Triệu
+              ~{Math.round((safeRev * safeNetPct) / 100)} Triệu
             </div>
-            <div className="text-[11px] text-slate-300">Net Margin: {model.pnl.netMarginPercent}%</div>
+            <div className="text-[11px] text-slate-300">Net Margin: {safeNetPct}%</div>
           </div>
           <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800">
             <div className="text-xs text-slate-400">Vốn đầu tư (CAPEX)</div>
             <div className="text-lg font-bold text-amber-300 mt-0.5">
-              {model.pnl.initialCapexMinVND} - {model.pnl.initialCapexMaxVND} Tr
+              {safeCapexMin} - {safeCapexMax} Tr
             </div>
             <div className="text-[11px] text-slate-300">
-              Hoàn vốn: {model.pnl.paybackMonthsMin}-{model.pnl.paybackMonthsMax} tháng
+              Hoàn vốn: {safePaybackMin}-{safePaybackMax} tháng
             </div>
           </div>
           <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800">
             <div className="text-xs text-slate-400">Đơn trung bình (AOV) & Lặp lại</div>
-            <div className="text-lg font-bold text-cyan-300 mt-0.5">{model.pnl.averageOrderValueVND}.000đ</div>
-            <div className="text-[11px] text-slate-300">Khách quay lại: {model.pnl.repeatRatePercent}%</div>
+            <div className="text-lg font-bold text-cyan-300 mt-0.5">{safeAov}.000đ</div>
+            <div className="text-[11px] text-slate-300">Khách quay lại: {safeRepeatPct}%</div>
           </div>
         </div>
 
         <div className="p-3 rounded-lg bg-indigo-950/40 border border-indigo-500/30 text-xs text-indigo-200 flex items-start gap-2">
           <DollarSign className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
           <div>
-            <strong>Đặc thù Vòng quay Dòng tiền (Cashflow Cycle):</strong> {model.pnl.cashflowCycle}
+            <strong>Đặc thù Vòng quay Dòng tiền (Cashflow Cycle):</strong>{' '}
+            {model?.pnl?.cashflowCycle || 'Thu tiền mặt/QR trực tiếp và qua gói thẻ thành viên trả trước.'}
           </div>
         </div>
       </div>
@@ -260,7 +299,7 @@ export default function PnLSimulatorCard({ model, onClose }: PnLSimulatorCardPro
       <div className="bg-gradient-to-br from-indigo-950/50 via-slate-900 to-slate-900 rounded-xl p-5 border border-indigo-500/40 space-y-4">
         <div className="flex items-center justify-between">
           <h4 className="text-sm md:text-base font-bold text-white flex items-center gap-2">
-            <Calculator className="w-4 h-4 text-indigo-400" /> Bộ Mô Phỏng Dòng Tiền & Điểm Hòa Vốn Thực Tế (Interactive ROI Simulator)
+            <Calculator className="w-4 h-4 text-indigo-400" /> Bộ Mô Phỏng Dòng Tiền & Điểm Hòa Vốn Thực Tế
           </h4>
           <span className="text-xs text-indigo-300">Kéo thanh trượt để ướm thử mặt bằng của bạn</span>
         </div>
@@ -276,7 +315,7 @@ export default function PnLSimulatorCard({ model, onClose }: PnLSimulatorCardPro
               <input
                 type="range"
                 min={5}
-                max={Math.max(300, defaultDailyOrders * 2.5)}
+                max={Math.max(300, Math.round(defaultDailyOrders * 2.5))}
                 value={dailyOrders}
                 onChange={(e) => setDailyOrders(Number(e.target.value))}
                 className="w-full accent-indigo-500 cursor-pointer"
@@ -286,12 +325,14 @@ export default function PnLSimulatorCard({ model, onClose }: PnLSimulatorCardPro
             <div>
               <div className="flex justify-between text-xs mb-1">
                 <span className="text-slate-300">Giá trị đơn hàng trung bình (AOV):</span>
-                <span className="font-bold text-cyan-300">{aovThousand.toLocaleString('vi-VN')}.000 VNĐ</span>
+                <span className="font-bold text-cyan-300">
+                  {Number(aovThousand || 0).toLocaleString('vi-VN')}.000 VNĐ
+                </span>
               </div>
               <input
                 type="range"
                 min={15}
-                max={Math.max(2000, model.pnl.averageOrderValueVND * 2)}
+                max={Math.max(2000, safeAov * 2)}
                 step={5}
                 value={aovThousand}
                 onChange={(e) => setAovThousand(Number(e.target.value))}
@@ -338,7 +379,7 @@ export default function PnLSimulatorCard({ model, onClose }: PnLSimulatorCardPro
               <div className="text-xs text-slate-400">Doanh thu mô phỏng</div>
               <div className="text-xl font-bold text-white mt-1">{simMonthlyRevMil} Tr/tháng</div>
               <div className="text-[11px] text-slate-400 mt-0.5">
-                Lãi gộp ({model.pnl.grossMarginPercent}%): {simGrossProfitMil} Tr
+                Lãi gộp ({safeGrossPct}%): {simGrossProfitMil} Tr
               </div>
             </div>
 
@@ -384,7 +425,7 @@ export default function PnLSimulatorCard({ model, onClose }: PnLSimulatorCardPro
             <CheckCircle2 className="w-4 h-4" /> Bí quyết thành công & Tối ưu dòng tiền
           </div>
           <ul className="space-y-1.5 text-xs text-slate-200 list-disc list-inside">
-            {model.keySuccessFactors.map((ksf, i) => (
+            {safeKSF.map((ksf, i) => (
               <li key={i}>{ksf}</li>
             ))}
           </ul>
@@ -395,7 +436,7 @@ export default function PnLSimulatorCard({ model, onClose }: PnLSimulatorCardPro
             <AlertTriangle className="w-4 h-4" /> Rủi ro P&L cần kiểm soát chặt
           </div>
           <ul className="space-y-1.5 text-xs text-slate-200 list-disc list-inside">
-            {model.risks.map((r, i) => (
+            {safeRisks.map((r, i) => (
               <li key={i}>{r}</li>
             ))}
           </ul>
