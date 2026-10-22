@@ -26,6 +26,7 @@ import PnLSimulatorCard from '@/components/PnLSimulatorCard';
 import {
   AdminLeadCrmModal,
   EmailPdfActionCard,
+  isAdminEmail,
   LeadAuthGate,
   LoggedInUserBar,
   SmtpClientConfig,
@@ -485,14 +486,8 @@ export default function CashflowBizAdvisorApp() {
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col notranslate" translate="no">
         <LeadAuthGate
           onAuthenticated={handleUserAuthenticated}
-          onOpenAdmin={() => setShowAdminModal(true)}
+          onOpenAdmin={() => {}}
           smtpConfig={smtpConfig}
-        />
-        <AdminLeadCrmModal
-          isOpen={showAdminModal}
-          onClose={() => setShowAdminModal(false)}
-          smtpConfig={smtpConfig}
-          onSaveSmtpConfig={handleSaveSmtpConfig}
         />
       </div>
     );
@@ -582,13 +577,15 @@ export default function CashflowBizAdvisorApp() {
               onLogout={handleLogoutLead}
               onOpenAdmin={() => setShowAdminModal(true)}
             />
-            <button
-              onClick={() => setShowSettingsModal(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-xs font-medium text-slate-300 border border-slate-800 transition"
-            >
-              <Settings className="w-3.5 h-3.5 text-indigo-400" />
-              <span className="hidden xl:inline">API Key</span>
-            </button>
+            {isAdminEmail(currentUser.email) && (
+              <button
+                onClick={() => setShowSettingsModal(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-xs font-medium text-slate-300 border border-slate-800 transition"
+              >
+                <Settings className="w-3.5 h-3.5 text-indigo-400" />
+                <span className="hidden xl:inline">API Key</span>
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -1885,8 +1882,8 @@ export default function CashflowBizAdvisorApp() {
         )}
       </main>
 
-      {/* SETTINGS MODAL FOR OPTIONAL API KEYS */}
-      {showSettingsModal && (
+      {/* SETTINGS MODAL FOR OPTIONAL API KEYS (ONLY ADMIN EMAILS) */}
+      {showSettingsModal && isAdminEmail(currentUser.email) && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -1959,10 +1956,11 @@ export default function CashflowBizAdvisorApp() {
         </div>
       )}
 
-      {/* ADMIN LEAD CRM MODAL */}
+      {/* ADMIN LEAD CRM MODAL (ONLY ADMIN EMAILS) */}
       <AdminLeadCrmModal
-        isOpen={showAdminModal}
+        isOpen={showAdminModal && isAdminEmail(currentUser.email)}
         onClose={() => setShowAdminModal(false)}
+        currentUserEmail={currentUser.email}
         smtpConfig={smtpConfig}
         onSaveSmtpConfig={handleSaveSmtpConfig}
       />

@@ -34,6 +34,13 @@ export interface SmtpClientConfig {
   webhookUrl: string;
 }
 
+export const ADMIN_EMAIL_WHITELIST = ['nghvien@gmail.com', 'vien.nguyenh@gmail.com'];
+
+export function isAdminEmail(email?: string | null): boolean {
+  if (!email) return false;
+  return ADMIN_EMAIL_WHITELIST.includes(email.trim().toLowerCase());
+}
+
 export function triggerPdfDownload(pdfBase64: string, fileName: string) {
   const byteCharacters = atob(pdfBase64);
   const byteNumbers = new Array(byteCharacters.length);
@@ -158,13 +165,6 @@ export function LeadAuthGate({
             </span>
           </div>
         </div>
-        <button
-          onClick={onOpenAdmin}
-          className="text-xs px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 flex items-center gap-1.5 transition"
-        >
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-          Quản trị Lead (Admin)
-        </button>
       </div>
 
       {/* Main Content */}
@@ -571,12 +571,7 @@ export function EmailPdfActionCard({
             ) : (
               <div className="text-amber-300 font-semibold">
                 ✅ Đã xuất thành công file <strong>{statusResult.fileName}</strong> và tự động tải
-                về máy của bạn!{' '}
-                <span className="text-slate-300 font-normal">
-                  (Lưu ý: Để hệ thống tự động bắn email qua Gmail của bạn, hãy nhập Gmail & Mật
-                  khẩu ứng dụng trong nút <strong>Quản trị Lead (Admin)</strong> hoặc biến môi
-                  trường Vercel `GMAIL_USER` & `GMAIL_APP_PASSWORD`).
-                </span>
+                về máy của bạn!
               </div>
             )}
           </div>
@@ -600,11 +595,13 @@ export function EmailPdfActionCard({
 export function AdminLeadCrmModal({
   isOpen,
   onClose,
+  currentUserEmail,
   smtpConfig,
   onSaveSmtpConfig,
 }: {
   isOpen: boolean;
   onClose: () => void;
+  currentUserEmail?: string;
   smtpConfig: SmtpClientConfig;
   onSaveSmtpConfig: (cfg: SmtpClientConfig) => void;
 }) {
@@ -624,7 +621,7 @@ export function AdminLeadCrmModal({
   const [draftConfig, setDraftConfig] = useState<SmtpClientConfig>(smtpConfig);
   const [savedNotice, setSavedNotice] = useState(false);
 
-  if (!isOpen) return null;
+  if (!isOpen || !isAdminEmail(currentUserEmail)) return null;
 
   const handleLoginAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -634,7 +631,10 @@ export function AdminLeadCrmModal({
       const res = await fetch('/api/admin/leads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ adminPassword }),
+        body: JSON.stringify({
+          adminEmail: currentUserEmail,
+          adminPassword,
+        }),
       });
       const data = await res.json();
       if (!res.ok || data.error) {
@@ -1004,6 +1004,8 @@ export function LoggedInUserBar({
   onLogout: () => void;
   onOpenAdmin: () => void;
 }) {
+  const isAdmin = isAdminEmail(user.email);
+
   return (
     <div className="flex flex-wrap items-center gap-2">
       <div className="px-3 py-1.5 rounded-xl bg-slate-800/90 border border-slate-700 flex items-center gap-2 text-xs">
@@ -1011,15 +1013,17 @@ export function LoggedInUserBar({
         <span className="font-semibold text-white">{user.fullName}</span>
         <span className="text-slate-400 hidden sm:inline">({user.email})</span>
       </div>
-      <button
-        type="button"
-        onClick={onOpenAdmin}
-        className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs flex items-center gap-1 transition"
-        title="Quản trị Lead (Admin CRM)"
-      >
-        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-        <span className="hidden md:inline">Admin CRM</span>
-      </button>
+      {isAdmin && (
+        <button
+          type="button"
+          onClick={onOpenAdmin}
+          className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs flex items-center gap-1 transition"
+          title="Quản trị Lead (Admin CRM)"
+        >
+          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+          <span className="hidden md:inline">Admin CRM</span>
+        </button>
+      )}
       <button
         type="button"
         onClick={onLogout}

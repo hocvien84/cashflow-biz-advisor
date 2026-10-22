@@ -1,11 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAllLeadsFromDb } from '@/lib/db';
 
+const ADMIN_EMAIL_WHITELIST = ['nghvien@gmail.com', 'vien.nguyenh@gmail.com'];
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    const adminEmail = String(body.adminEmail || '')
+      .trim()
+      .toLowerCase();
     const adminPassword = String(body.adminPassword || '').trim();
     const expectedPassword = (process.env.ADMIN_PASSWORD || 'admin123').trim();
+
+    if (!ADMIN_EMAIL_WHITELIST.includes(adminEmail)) {
+      return NextResponse.json(
+        {
+          error:
+            'Tài khoản của bạn không có quyền Quản trị viên (Chỉ nghvien@gmail.com và vien.nguyenh@gmail.com được cấp quyền).',
+        },
+        { status: 403 }
+      );
+    }
 
     if (adminPassword !== expectedPassword) {
       return NextResponse.json(
