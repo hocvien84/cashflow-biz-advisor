@@ -85,6 +85,7 @@ export default function CashflowBizAdvisorApp() {
   const [areaData, setAreaData] = useState<AreaIntelligenceRecord | null>(null);
   const [cachedAreasList, setCachedAreasList] = useState<AreaIntelligenceRecord[]>([]);
   const [isScanningArea, setIsScanningArea] = useState<boolean>(false);
+  const [isSearchingGeocode, setIsSearchingGeocode] = useState<boolean>(false);
   const [areaStatusMsg, setAreaStatusMsg] = useState<string>('');
 
   // 3. State: Ikigai & User Resources
@@ -152,7 +153,7 @@ export default function CashflowBizAdvisorApp() {
       forceRefresh = false
     ) => {
       setIsScanningArea(true);
-      setAreaStatusMsg('');
+      setAreaStatusMsg('⏳ Đang quét các địa điểm (POIs) trong bán kính và phân tích nhân khẩu học...');
       try {
         const res = await fetch('/api/area-research', {
           method: 'POST',
@@ -164,6 +165,7 @@ export default function CashflowBizAdvisorApp() {
             locationNameInput: locName,
             forceRefresh,
             apiKey: geminiApiKey,
+            googleMapsApiKey,
           }),
         });
         const data = await res.json();
@@ -174,11 +176,12 @@ export default function CashflowBizAdvisorApp() {
         }
       } catch (e) {
         console.error('Area scan error:', e);
+        setAreaStatusMsg('⚠️ Có lỗi kết nối tạm thời khi quét khu vực, vui lòng thử lại.');
       } finally {
         setIsScanningArea(false);
       }
     },
-    [geminiApiKey]
+    [geminiApiKey, googleMapsApiKey]
   );
 
   // Run initial area scan on first load so the user immediately has rich location data
@@ -190,13 +193,52 @@ export default function CashflowBizAdvisorApp() {
   const handleGeocodeSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!locationQuery.trim()) return;
+    setIsSearchingGeocode(true);
+    setAreaStatusMsg(`🔍 Đang tìm tọa độ cho "${locationQuery}"...`);
     try {
-      const res = await fetch(`/api/geocode?q=${encodeURIComponent(locationQuery)}`);
+      const res = await fetch(
+        `/api/geocode?q=${encodeURIComponent(locationQuery)}&gmapsKey=${encodeURIComponent(
+          googleMapsApiKey
+        )}&geminiKey=${encodeURIComponent(geminiApiKey)}`
+      );
       const data = await res.json();
-      setGeocodeResults(data.results || []);
+      const found = data.results || [];
+      setGeocodeResults(found);
+      if (found.length > 0) {
+        const first = found[0];
+        setLat(first.lat);
+        setLng(first.lng);
+        await triggerAreaScan(first.lat, first.lng, radiusKm, first.name, false);
+      } else {
+        setAreaStatusMsg(
+          `⚠️ Không tìm thấy địa danh "${locationQuery}". Hãy thử nhập tên Quận/Phường (VD: Cầu Giấy Hà Nội, Quận 7 TPHCM) hoặc click trực tiếp lên bản đồ!`
+        );
+      }
     } catch (err) {
       console.error(err);
+    } finally {
+      setIsSearchingGeocode(false);
     }
+  };
+
+  const handleUseMyGPS = () => {
+    if (!navigator.geolocation) {
+      setAreaStatusMsg('⚠️ Trình duyệt không hỗ trợ định vị GPS.');
+      return;
+    }
+    setAreaStatusMsg('📡 Đang lấy tọa độ GPS hiện tại của bạn...');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const myLat = Number(pos.coords.latitude.toFixed(5));
+        const myLng = Number(pos.coords.longitude.toFixed(5));
+        setLat(myLat);
+        setLng(myLng);
+        triggerAreaScan(myLat, myLng, radiusKm, '', false);
+      },
+      () => {
+        setAreaStatusMsg('⚠️ Bạn chưa cấp quyền truy cập vị trí GPS trên trình duyệt.');
+      }
+    );
   };
 
   const handleAiModelResearch = async () => {
@@ -857,24 +899,39 @@ export default function CashflowBizAdvisorApp() {
               </div>
 
               {/* Search Input & Preset Locations */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-2 border-t border-slate-800/80">
-                <form onSubmit={handleGeocodeSearch} className="flex gap-2">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 pt-2 border-t border-slate-800/80">
+                <form onSubmit={handleGeocodeSearch} className="lg:col-span-5 flex gap-2">
                   <input
                     type="text"
                     value={locationQuery}
                     onChange={(e) => setLocationQuery(e.target.value)}
-                    placeholder="Nhập địa chỉ, phường, quận (VD: Cầu Giấy Hà Nội, Quận 1...)"
+                    placeholder="Nhập địa chỉ, phường, quận (VD: Cầu Giấy, Quận 1, Đà Nẵng...)"
                     className="flex-1 px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                   />
                   <button
                     type="submit"
-                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white border border-slate-700 transition"
+                    disabled={isSearchingGeocode || isScanningArea}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white transition flex items-center gap-1.5 shrink-0 disabled:opacity-50"
                   >
-                    Tìm địa điểm
+                    {isSearchingGeocode ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Search className="w-3.5 h-3.5" />
+                    )}
+                    Tìm & Quét
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleUseMyGPS}
+                    disabled={isScanningArea}
+                    className="px-3 py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-xs font-semibold text-emerald-300 border border-emerald-500/40 transition shrink-0"
+                    title="Định vị vị trí hiện tại của bạn"
+                  >
+                    📍 GPS
                   </button>
                 </form>
 
-                <div className="lg:col-span-2 flex flex-wrap items-center gap-1.5">
+                <div className="lg:col-span-7 flex flex-wrap items-center gap-1.5">
                   <span className="text-xs text-slate-400 mr-1">Khu vực mẫu:</span>
                   {PRESET_LOCATIONS.map((preset, idx) => (
                     <button

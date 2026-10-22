@@ -8,6 +8,7 @@ import {
   Pin,
   InfoWindow,
   useAdvancedMarkerRef,
+  useMap,
 } from '@vis.gl/react-google-maps';
 import { DiscoveredPOI } from '@/types/business';
 import { POI_CATEGORY_META } from '@/data/matrix-constants';
@@ -53,6 +54,57 @@ function GooglePOIMarker({ poi }: { poi: DiscoveredPOI }) {
   );
 }
 
+function GoogleMapCameraAndCircle({
+  lat,
+  lng,
+  radiusKm,
+}: {
+  lat: number;
+  lng: number;
+  radiusKm: number;
+}) {
+  const map = useMap();
+  const circleRef = useRef<google.maps.Circle | null>(null);
+
+  useEffect(() => {
+    if (!map) return;
+    map.panTo({ lat, lng });
+    const targetZoom = radiusKm <= 0.5 ? 16 : radiusKm <= 1.2 ? 15 : 14;
+    map.setZoom(targetZoom);
+
+    if (typeof google !== 'undefined' && google.maps?.Circle) {
+      if (!circleRef.current) {
+        circleRef.current = new google.maps.Circle({
+          map,
+          center: { lat, lng },
+          radius: radiusKm * 1000,
+          strokeColor: '#6366f1',
+          strokeOpacity: 0.9,
+          strokeWeight: 2,
+          fillColor: '#6366f1',
+          fillOpacity: 0.15,
+          clickable: false,
+        });
+      } else {
+        circleRef.current.setCenter({ lat, lng });
+        circleRef.current.setRadius(radiusKm * 1000);
+        circleRef.current.setMap(map);
+      }
+    }
+  }, [map, lat, lng, radiusKm]);
+
+  useEffect(() => {
+    return () => {
+      if (circleRef.current) {
+        circleRef.current.setMap(null);
+        circleRef.current = null;
+      }
+    };
+  }, []);
+
+  return null;
+}
+
 export default function LocationMapView({
   lat,
   lng,
@@ -65,6 +117,20 @@ export default function LocationMapView({
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const leafletMapRef = useRef<import('leaflet').Map | null>(null);
   const layerGroupRef = useRef<import('leaflet').LayerGroup | null>(null);
+  const onSelectLocationRef = useRef(onSelectLocation);
+
+  useEffect(() => {
+    onSelectLocationRef.current = onSelectLocation;
+  }, [onSelectLocation]);
+
+  // If switching to Google Maps mode, destroy existing Leaflet instance so switching back works cleanly
+  useEffect(() => {
+    if (useGoogleMaps && googleMapsApiKey && leafletMapRef.current) {
+      leafletMapRef.current.remove();
+      leafletMapRef.current = null;
+      layerGroupRef.current = null;
+    }
+  }, [useGoogleMaps, googleMapsApiKey]);
 
   // Render Leaflet OpenStreetMap when not in Google Maps mode
   useEffect(() => {
@@ -91,7 +157,7 @@ export default function LocationMapView({
         layerGroupRef.current = group;
 
         map.on('click', (e: import('leaflet').LeafletMouseEvent) => {
-          onSelectLocation(
+          onSelectLocationRef.current(
             Number(e.latlng.lat.toFixed(5)),
             Number(e.latlng.lng.toFixed(5))
           );
@@ -162,7 +228,7 @@ export default function LocationMapView({
     return () => {
       isMounted = false;
     };
-  }, [lat, lng, radiusKm, pois, useGoogleMaps, googleMapsApiKey, onSelectLocation]);
+  }, [lat, lng, radiusKm, pois, useGoogleMaps, googleMapsApiKey]);
 
   // Clean up Leaflet instance on unmount
   useEffect(() => {
@@ -176,31 +242,40 @@ export default function LocationMapView({
 
   if (useGoogleMaps && googleMapsApiKey) {
     return (
-      <div style={{ height: '480px', width: '100%' }} className="rounded-xl overflow-hidden border border-slate-700/80 relative">
-        <APIProvider apiKey={googleMapsApiKey}>
-          <GoogleMap
-            mapId="DEMO_MAP_ID"
-            defaultZoom={15}
-            center={{ lat, lng }}
-            gestureHandling="greedy"
-            internalUsageAttributionIds={['gmp_git_agentskills_v1']}
-            onClick={(ev) => {
-              if (ev.detail.latLng) {
-                onSelectLocation(
-                  Number(ev.detail.latLng.lat.toFixed(5)),
-                  Number(ev.detail.latLng.lng.toFixed(5))
-                );
-              }
-            }}
-          >
-            <AdvancedMarker position={{ lat, lng }} title="Vị trí mặt bằng kinh doanh">
-              <Pin background="#f43f5e" borderColor="#ffffff" glyphColor="#ffffff" scale={1.2} />
-            </AdvancedMarker>
-            {pois.map((poi) => (
-              <GooglePOIMarker key={poi.id} poi={poi} />
-            ))}
-          </GoogleMap>
-        </APIProvider>
+      <div className="space-y-2">
+        <div
+          style={{ height: '480px', width: '100%' }}
+          className="rounded-xl overflow-hidden border border-slate-700/80 relative"
+        >
+          <APIProvider apiKey={googleMapsApiKey}>
+            <GoogleMap
+              mapId="DEMO_MAP_ID"
+              defaultZoom={15}
+              defaultCenter={{ lat, lng }}
+              gestureHandling="greedy"
+              internalUsageAttributionIds={['gmp_git_agentskills_v1']}
+              onClick={(ev) => {
+                if (ev.detail.latLng) {
+                  onSelectLocationRef.current(
+                    Number(ev.detail.latLng.lat.toFixed(5)),
+                    Number(ev.detail.latLng.lng.toFixed(5))
+                  );
+                }
+              }}
+            >
+              <GoogleMapCameraAndCircle lat={lat} lng={lng} radiusKm={radiusKm} />
+              <AdvancedMarker position={{ lat, lng }} title="Vị trí mặt bằng kinh doanh">
+                <Pin background="#f43f5e" borderColor="#ffffff" glyphColor="#ffffff" scale={1.2} />
+              </AdvancedMarker>
+              {pois.map((poi) => (
+                <GooglePOIMarker key={poi.id} poi={poi} />
+              ))}
+            </GoogleMap>
+          </APIProvider>
+        </div>
+        <div className="text-[11px] text-amber-300 bg-amber-950/30 border border-amber-500/30 px-3 py-1.5 rounded-lg">
+          💡 Đang dùng <strong>Google Maps SDK</strong>. Nếu màn hình bản đồ báo lỗi <code>RefererNotAllowed</code> hoặc chưa bật <code>Maps JavaScript API</code> trên Google Cloud Console, bạn có thể bỏ tích ô Google Maps trong phần Cấu hình để dùng bản đồ OpenStreetMap tương tác đầy đủ (vẫn dùng Google API Key của bạn để tìm địa chỉ & quét địa điểm ngầm ở phía sau!).
+        </div>
       </div>
     );
   }
@@ -210,10 +285,10 @@ export default function LocationMapView({
       <div
         ref={mapContainerRef}
         style={{ height: '480px', width: '100%' }}
-        className="rounded-xl overflow-hidden border border-slate-700/80 z-0"
+        className="rounded-xl overflow-hidden border border-slate-700/80 z-0 cursor-crosshair"
       />
       <div className="mt-2.5 flex flex-wrap items-center gap-2 text-xs text-slate-300 bg-slate-900/90 p-2.5 rounded-lg border border-slate-800">
-        <span className="font-semibold text-slate-200 mr-1">Chú giải POI trên bản đồ:</span>
+        <span className="font-semibold text-slate-200 mr-1">Chú giải POI trên bản đồ (Click bất kỳ đâu trên bản đồ để ghim vị trí mới):</span>
         <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
           <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block" /> Tâm mặt bằng
         </span>
