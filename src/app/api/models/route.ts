@@ -63,17 +63,17 @@ export async function POST(req: NextRequest) {
     const tierLabel = PRICE_TIERS.find((t) => t.id === safeTier)?.label || safeTier;
     const isMultiNeed = safeNeeds.length > 1 || safeAges.length > 1;
 
-    // Chuẩn bị khung mô hình chuẩn ngành làm nền tảng an toàn (Fallback / Merge Base)
-    const rev = safeTier === 'budget' ? 140 : safeTier === 'mid' ? 230 : 380;
-    const cogs = safeTier === 'budget' ? 45 : safeTier === 'mid' ? 36 : 28;
+    // Chuẩn bị khung mô hình chuẩn ngành làm nền tảng an toàn (Fallback / Merge Base) theo mặt bằng Việt Nam
+    const rev = safeTier === 'budget' ? 120 : safeTier === 'mid' ? 210 : 350;
+    const cogs = safeTier === 'budget' ? 46 : safeTier === 'mid' ? 40 : 34;
     const gross = 100 - cogs;
-    const rent = 13;
-    const labor = 17;
-    const opex = 10;
-    const net = gross - rent - labor - opex;
-    const capexMin = safeTier === 'budget' ? 90 : safeTier === 'mid' ? 190 : 420;
-    const capexMax = safeTier === 'budget' ? 180 : safeTier === 'mid' ? 380 : 850;
-    const defaultAov = safeTier === 'budget' ? 55 : safeTier === 'mid' ? 210 : 650;
+    const rent = 14;
+    const labor = 18;
+    const opex = 12;
+    const net = Math.max(10, Math.min(20, gross - rent - labor - opex));
+    const capexMin = safeTier === 'budget' ? 85 : safeTier === 'mid' ? 180 : 390;
+    const capexMax = safeTier === 'budget' ? 175 : safeTier === 'mid' ? 370 : 820;
+    const defaultAov = safeTier === 'budget' ? 50 : safeTier === 'mid' ? 190 : 580;
 
     const baseSynthesized: BusinessModel = {
       id: `ai-${Date.now()}`,

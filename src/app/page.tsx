@@ -60,10 +60,35 @@ const LocationMapView = dynamic(() => import('@/components/LocationMapView'), {
   ssr: false,
   loading: () => (
     <div className="h-[480px] w-full rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 text-sm">
-      Đang tải bản đồ định vị bán kính...
+      <span>Đang tải bản đồ định vị bán kính...</span>
     </div>
   ),
 });
+
+// Protect React 19 DOM reconciler against Chrome Google Translate / Autofill <font> tag mutations
+if (typeof window !== 'undefined' && typeof Node === 'function' && Node.prototype) {
+  const origRemoveChild = Node.prototype.removeChild;
+  Node.prototype.removeChild = function <T extends Node>(child: T): T {
+    if (child && child.parentNode !== this) {
+      if (child.parentNode) {
+        return child.parentNode.removeChild(child);
+      }
+      return child;
+    }
+    return origRemoveChild.apply(this, arguments as unknown as [Node]) as T;
+  };
+
+  const origInsertBefore = Node.prototype.insertBefore;
+  Node.prototype.insertBefore = function <T extends Node>(
+    newNode: T,
+    referenceNode: Node | null
+  ): T {
+    if (referenceNode && referenceNode.parentNode !== this) {
+      return this.appendChild(newNode);
+    }
+    return origInsertBefore.apply(this, arguments as unknown as [Node, Node | null]) as T;
+  };
+}
 
 type ActiveTab = 'matrix' | 'location' | 'ikigai' | 'advisor';
 
@@ -964,7 +989,7 @@ export default function CashflowBizAdvisorApp() {
                                 : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
                             }`}
                           >
-                            {nd.label.split(' ')[0]}
+                            <span>{nd.label.split('(')[0].trim()}</span>
                           </button>
                         );
                       })}
@@ -986,14 +1011,14 @@ export default function CashflowBizAdvisorApp() {
                               : 'bg-slate-900 text-slate-400 border-slate-800'
                           }`}
                         >
-                          {t.label.split(' ')[0]}
+                          <span>{t.label.split('(')[0].trim()}</span>
                         </button>
                       ))}
                     </div>
                   </div>
 
                   {/* Optional specific idea */}
-                  <form onSubmit={handleAiModelResearch} className="space-y-3">
+                  <div className="space-y-3">
                     <div className="space-y-1.5">
                       <label className="text-xs font-semibold text-slate-300">
                         4. Ý tưởng / Ngách cụ thể muốn AI đào sâu BCTC & P&L (Nhấn Enter hoặc bấm nút):
@@ -1002,35 +1027,43 @@ export default function CashflowBizAdvisorApp() {
                         type="text"
                         value={researchCustomText}
                         onChange={(e) => setResearchCustomText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAiModelResearch();
+                          }
+                        }}
                         placeholder="VD: Chuỗi bánh ăn dặm & sữa hạt cho bé, Trạm sạc + Cafe..."
                         className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                       />
                     </div>
 
                     <button
-                      type="submit"
+                      type="button"
+                      onClick={() => handleAiModelResearch()}
                       disabled={isResearchingModel}
                       className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer"
                     >
-                      {isResearchingModel ? (
-                        <>
+                      <span className="inline-flex items-center">
+                        {isResearchingModel ? (
                           <Loader2 className="w-4 h-4 animate-spin" />
-                          Đang Research Thị Trường Châu Á & Bóc Tách P&L...
-                        </>
-                      ) : (
-                        <>
+                        ) : (
                           <PlusCircle className="w-4 h-4" />
-                          Research & Lưu Mô Hình Vào Database
-                        </>
-                      )}
+                        )}
+                      </span>
+                      <span>
+                        {isResearchingModel
+                          ? 'Đang Research Thị Trường Châu Á & Bóc Tách P&L...'
+                          : 'Research & Lưu Mô Hình Vào Database'}
+                      </span>
                     </button>
 
                     {researchFeedback && (
                       <div className="p-3 rounded-xl bg-emerald-950/50 border border-emerald-500/40 text-xs text-emerald-200 font-medium leading-relaxed">
-                        {researchFeedback}
+                        <span>{researchFeedback}</span>
                       </div>
                     )}
-                  </form>
+                  </div>
                 </div>
 
                 {/* Highlight Multi-need Exemplars */}
@@ -1103,16 +1136,19 @@ export default function CashflowBizAdvisorApp() {
                     className="w-36 accent-indigo-500 cursor-pointer"
                   />
                   <button
+                    type="button"
                     onClick={() => triggerAreaScan(lat, lng, radiusKm, '', false)}
                     disabled={isScanningArea}
                     className="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 transition disabled:opacity-50"
                   >
-                    {isScanningArea ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Search className="w-3.5 h-3.5" />
-                    )}
-                    Phân tích
+                    <span className="inline-flex items-center">
+                      {isScanningArea ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Search className="w-3.5 h-3.5" />
+                      )}
+                    </span>
+                    <span>Phân tích</span>
                   </button>
                 </div>
               </div>
@@ -1132,12 +1168,14 @@ export default function CashflowBizAdvisorApp() {
                     disabled={isSearchingGeocode || isScanningArea}
                     className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white transition flex items-center gap-1.5 shrink-0 disabled:opacity-50"
                   >
-                    {isSearchingGeocode ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Search className="w-3.5 h-3.5" />
-                    )}
-                    Tìm & Quét
+                    <span className="inline-flex items-center">
+                      {isSearchingGeocode ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Search className="w-3.5 h-3.5" />
+                      )}
+                    </span>
+                    <span>Tìm & Quét</span>
                   </button>
                   <button
                     type="button"
