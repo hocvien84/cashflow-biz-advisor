@@ -15,12 +15,20 @@ import {
   AreaIntelligenceRecord,
   BusinessModel,
   IkigaiUserInput,
+  LeadUser,
   MaslowNeedId,
   PriceTierId,
   POICategory,
 } from '@/types/business';
 import { scoreBusinessModels } from '@/lib/recommendation-engine';
 import PnLSimulatorCard from '@/components/PnLSimulatorCard';
+import {
+  AdminLeadCrmModal,
+  EmailPdfActionCard,
+  LeadAuthGate,
+  LoggedInUserBar,
+  SmtpClientConfig,
+} from '@/components/LeadGateAndCrm';
 import {
   Grid,
   MapPin,
@@ -107,12 +115,47 @@ export default function CashflowBizAdvisorApp() {
   const [googleMapsApiKey, setGoogleMapsApiKey] = useState<string>('');
   const [useGoogleMaps, setUseGoogleMaps] = useState<boolean>(false);
 
+  // 5. Lead Capture Account & Admin CRM State
+  const [currentUser, setCurrentUser] = useState<LeadUser | null>(null);
+  const [authChecked, setAuthChecked] = useState<boolean>(false);
+  const [showAdminModal, setShowAdminModal] = useState<boolean>(false);
+  const [smtpConfig, setSmtpConfig] = useState<SmtpClientConfig>({
+    gmailUser: '',
+    gmailAppPassword: '',
+    resendApiKey: '',
+    webhookUrl: '',
+  });
+
   // Load saved keys from localStorage + initial models & cached areas from SQLite
   useEffect(() => {
     const savedGemini = localStorage.getItem('CBA_GEMINI_KEY') || '';
     const savedGMaps = localStorage.getItem('CBA_GMAPS_KEY') || '';
     if (savedGemini) setGeminiApiKey(savedGemini);
     if (savedGMaps) setGoogleMapsApiKey(savedGMaps);
+
+    try {
+      const savedLeadRaw = localStorage.getItem('CBA_LEAD_USER');
+      if (savedLeadRaw) {
+        const parsedLead = JSON.parse(savedLeadRaw) as LeadUser;
+        if (parsedLead && parsedLead.email) {
+          setCurrentUser(parsedLead);
+          if (parsedLead.capitalBudgetMilVND) {
+            setIkigai((prev) => ({
+              ...prev,
+              capitalBudgetMilVND: parsedLead.capitalBudgetMilVND,
+            }));
+          }
+        }
+      }
+      const savedSmtpRaw = localStorage.getItem('CBA_SMTP_CONFIG');
+      if (savedSmtpRaw) {
+        setSmtpConfig(JSON.parse(savedSmtpRaw));
+      }
+    } catch {
+      // ignore invalid storage
+    } finally {
+      setAuthChecked(true);
+    }
 
     fetchModels();
     fetchCachedAreasHistory();
@@ -325,8 +368,77 @@ export default function CashflowBizAdvisorApp() {
     return scoreBusinessModels(models, areaData, ikigai);
   }, [models, areaData, ikigai]);
 
+  // Sync lead activity (scanned location & top recommended models) to CRM DB
+  useEffect(() => {
+    if (!currentUser?.email || !areaData?.locationName) return;
+    const topNames = scoredRecommendations.slice(0, 3).map((r) => r.model.name);
+    fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'sync',
+        email: currentUser.email,
+        fullName: currentUser.fullName,
+        phone: currentUser.phone,
+        capitalBudgetMilVND: ikigai.capitalBudgetMilVND,
+        scannedLocation: areaData.locationName,
+        recommendedModels: topNames,
+      }),
+    }).catch(() => {});
+  }, [currentUser?.email, currentUser?.fullName, currentUser?.phone, areaData?.locationName, ikigai.capitalBudgetMilVND, scoredRecommendations]);
+
   const toggleArrayItem = <T,>(arr: T[], item: T): T[] =>
     arr.includes(item) ? arr.filter((x) => x !== item) : [...arr, item];
+
+  const handleUserAuthenticated = (user: LeadUser) => {
+    setCurrentUser(user);
+    localStorage.setItem('CBA_LEAD_USER', JSON.stringify(user));
+    if (user.capitalBudgetMilVND) {
+      setIkigai((prev) => ({
+        ...prev,
+        capitalBudgetMilVND: user.capitalBudgetMilVND,
+      }));
+    }
+    if (user.targetArea && user.targetArea.trim().length > 2) {
+      setLocationQuery(user.targetArea.trim());
+    }
+  };
+
+  const handleLogoutLead = () => {
+    setCurrentUser(null);
+    localStorage.removeItem('CBA_LEAD_USER');
+  };
+
+  const handleSaveSmtpConfig = (cfg: SmtpClientConfig) => {
+    setSmtpConfig(cfg);
+    localStorage.setItem('CBA_SMTP_CONFIG', JSON.stringify(cfg));
+  };
+
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-300 flex items-center justify-center text-sm">
+        Đang khởi tạo hệ thống tư vấn...
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <>
+        <LeadAuthGate
+          onAuthenticated={handleUserAuthenticated}
+          onOpenAdmin={() => setShowAdminModal(true)}
+          smtpConfig={smtpConfig}
+        />
+        <AdminLeadCrmModal
+          isOpen={showAdminModal}
+          onClose={() => setShowAdminModal(false)}
+          smtpConfig={smtpConfig}
+          onSaveSmtpConfig={handleSaveSmtpConfig}
+        />
+      </>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
@@ -406,13 +518,20 @@ export default function CashflowBizAdvisorApp() {
             </button>
           </nav>
 
-          <button
-            onClick={() => setShowSettingsModal(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-xs font-medium text-slate-300 border border-slate-800 transition"
-          >
-            <Settings className="w-4 h-4 text-indigo-400" />
-            <span className="hidden md:inline">Cấu hình API Key</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <LoggedInUserBar
+              user={currentUser}
+              onLogout={handleLogoutLead}
+              onOpenAdmin={() => setShowAdminModal(true)}
+            />
+            <button
+              onClick={() => setShowSettingsModal(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-xs font-medium text-slate-300 border border-slate-800 transition"
+            >
+              <Settings className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="hidden xl:inline">API Key</span>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -1470,6 +1589,15 @@ export default function CashflowBizAdvisorApp() {
         =================================================================== */}
         {activeTab === 'advisor' && (
           <div className="space-y-6">
+            {/* PDF Export & Email Delivery Banner */}
+            <EmailPdfActionCard
+              currentUser={currentUser}
+              areaRecord={areaData}
+              ikigai={ikigai}
+              recommendations={scoredRecommendations}
+              smtpConfig={smtpConfig}
+            />
+
             {/* Summary Context Banner */}
             <div className="bg-gradient-to-r from-indigo-950/80 via-slate-900 to-amber-950/40 border border-indigo-500/40 rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
               <div className="space-y-1">
@@ -1721,6 +1849,14 @@ export default function CashflowBizAdvisorApp() {
           </div>
         </div>
       )}
+
+      {/* ADMIN LEAD CRM MODAL */}
+      <AdminLeadCrmModal
+        isOpen={showAdminModal}
+        onClose={() => setShowAdminModal(false)}
+        smtpConfig={smtpConfig}
+        onSaveSmtpConfig={handleSaveSmtpConfig}
+      />
 
       {/* FOOTER */}
       <footer className="border-t border-slate-900 bg-slate-950 px-4 lg:px-8 py-4 text-[11px] text-slate-500">

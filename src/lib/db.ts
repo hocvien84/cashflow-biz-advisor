@@ -1,12 +1,14 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
-import { BusinessModel, AreaIntelligenceRecord } from '@/types/business';
+import crypto from 'node:crypto';
+import { BusinessModel, AreaIntelligenceRecord, LeadUser } from '@/types/business';
 import { buildCompleteSeedCatalog } from '@/data/seed-models';
 
 // In-memory fallback store (used if host runs Node < 22.5 without node:sqlite or read-only FS)
 let memoryModels: BusinessModel[] | null = null;
 let memoryAreas: Map<string, AreaIntelligenceRecord> | null = null;
+let memoryLeads: Map<string, LeadUser> | null = null;
 
 function getStorageDir(): string {
   const defaultDir = path.join(process.cwd(), 'data');
@@ -72,6 +74,19 @@ export function getDb(): SqliteDbLike | null {
         data_source TEXT NOT NULL DEFAULT 'osm_overpass',
         payload_json TEXT NOT NULL,
         cached_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS users_leads (
+        email TEXT PRIMARY KEY,
+        id TEXT NOT NULL,
+        full_name TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        capital_budget REAL NOT NULL DEFAULT 500,
+        target_area TEXT NOT NULL DEFAULT '',
+        payload_json TEXT NOT NULL,
+        last_active_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
       );
     `);
 
@@ -252,3 +267,252 @@ export function listCachedAreasFromDb(): AreaIntelligenceRecord[] {
     return rec;
   });
 }
+
+export function hashPassword(password: string): string {
+  return crypto.createHash('sha256').update(password.trim() + '_cashflow_salt_2026').digest('hex');
+}
+
+function ensureLeadsTable(db: SqliteDbLike): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users_leads (
+      email TEXT PRIMARY KEY,
+      id TEXT NOT NULL,
+      full_name TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      capital_budget REAL NOT NULL DEFAULT 500,
+      target_area TEXT NOT NULL DEFAULT '',
+      payload_json TEXT NOT NULL,
+      last_active_at TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+}
+
+export function registerOrUpdateLead(input: {
+  fullName: string;
+  email: string;
+  phone: string;
+  password?: string;
+  capitalBudgetMilVND?: number;
+  targetArea?: string;
+}): LeadUser {
+  const db = getDb();
+  const cleanEmail = input.email.trim().toLowerCase();
+  const now = new Date().toISOString();
+  const pwdHash = input.password ? hashPassword(input.password) : hashPassword('123456');
+
+  if (!db) {
+    if (!memoryLeads) memoryLeads = new Map<string, LeadUser>();
+    const existing = memoryLeads.get(cleanEmail);
+    const user: LeadUser = {
+      id: existing?.id || `lead_${Date.now().toString(36)}`,
+      fullName: input.fullName.trim() || existing?.fullName || 'Khách hàng',
+      email: cleanEmail,
+      phone: input.phone.trim() || existing?.phone || '',
+      passwordHash: input.password ? pwdHash : existing?.passwordHash || pwdHash,
+      capitalBudgetMilVND: input.capitalBudgetMilVND ?? existing?.capitalBudgetMilVND ?? 500,
+      targetArea: input.targetArea?.trim() || existing?.targetArea || '',
+      scannedLocations: existing?.scannedLocations || [],
+      topRecommendedModels: existing?.topRecommendedModels || [],
+      reportSentCount: existing?.reportSentCount || 0,
+      lastReportSentAt: existing?.lastReportSentAt,
+      lastActiveAt: now,
+      createdAt: existing?.createdAt || now,
+    };
+    memoryLeads.set(cleanEmail, user);
+    const { passwordHash: _ph, ...safeUser } = user;
+    return safeUser;
+  }
+
+  ensureLeadsTable(db);
+
+  const existingRow = db
+    .prepare('SELECT payload_json, password_hash FROM users_leads WHERE email = ?')
+    .get(cleanEmail) as { payload_json: string; password_hash: string } | undefined;
+
+  let existing: LeadUser | null = null;
+  if (existingRow) {
+    try {
+      existing = JSON.parse(existingRow.payload_json) as LeadUser;
+    } catch {
+      existing = null;
+    }
+  }
+
+  const finalPwdHash = input.password ? pwdHash : existingRow?.password_hash || pwdHash;
+  const userRecord: LeadUser = {
+    id: existing?.id || `lead_${Date.now().toString(36)}`,
+    fullName: input.fullName.trim() || existing?.fullName || 'Khách hàng',
+    email: cleanEmail,
+    phone: input.phone.trim() || existing?.phone || '',
+    capitalBudgetMilVND: input.capitalBudgetMilVND ?? existing?.capitalBudgetMilVND ?? 500,
+    targetArea: input.targetArea?.trim() || existing?.targetArea || '',
+    scannedLocations: existing?.scannedLocations || [],
+    topRecommendedModels: existing?.topRecommendedModels || [],
+    reportSentCount: existing?.reportSentCount || 0,
+    lastReportSentAt: existing?.lastReportSentAt,
+    lastActiveAt: now,
+    createdAt: existing?.createdAt || now,
+  };
+
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO users_leads (
+      email, id, full_name, phone, password_hash, capital_budget, target_area, payload_json, last_active_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(
+    cleanEmail,
+    userRecord.id,
+    userRecord.fullName,
+    userRecord.phone,
+    finalPwdHash,
+    userRecord.capitalBudgetMilVND,
+    userRecord.targetArea,
+    JSON.stringify(userRecord),
+    now,
+    userRecord.createdAt
+  );
+
+  return userRecord;
+}
+
+export function authenticateLead(
+  email: string,
+  password?: string
+): { success: boolean; user?: LeadUser; message?: string } {
+  const db = getDb();
+  const cleanEmail = email.trim().toLowerCase();
+  const now = new Date().toISOString();
+
+  if (!db) {
+    if (!memoryLeads) memoryLeads = new Map<string, LeadUser>();
+    const existing = memoryLeads.get(cleanEmail);
+    if (!existing) {
+      return {
+        success: false,
+        message: 'Email này chưa đăng ký trên hệ thống. Vui lòng chọn tab "Đăng ký tài khoản mới"!',
+      };
+    }
+    if (password && existing.passwordHash && existing.passwordHash !== hashPassword(password)) {
+      return {
+        success: false,
+        message: 'Mật khẩu không chính xác. Vui lòng thử lại hoặc đăng ký cập nhật lại thông tin.',
+      };
+    }
+    existing.lastActiveAt = now;
+    const { passwordHash: _ph, ...safeUser } = existing;
+    return { success: true, user: safeUser };
+  }
+
+  ensureLeadsTable(db);
+
+  const row = db
+    .prepare('SELECT payload_json, password_hash FROM users_leads WHERE email = ?')
+    .get(cleanEmail) as { payload_json: string; password_hash: string } | undefined;
+
+  if (!row) {
+    return {
+      success: false,
+      message: 'Email này chưa đăng ký trên hệ thống. Vui lòng chọn tab "Đăng ký tài khoản mới"!',
+    };
+  }
+
+  if (password && row.password_hash !== hashPassword(password)) {
+    return {
+      success: false,
+      message: 'Mật khẩu không chính xác. Vui lòng kiểm tra lại.',
+    };
+  }
+
+  const user = JSON.parse(row.payload_json) as LeadUser;
+  user.lastActiveAt = now;
+
+  db.prepare('UPDATE users_leads SET payload_json = ?, last_active_at = ? WHERE email = ?').run(
+    JSON.stringify(user),
+    now,
+    cleanEmail
+  );
+
+  return { success: true, user };
+}
+
+export function recordLeadConsultation(input: {
+  email: string;
+  fullName?: string;
+  phone?: string;
+  capitalBudgetMilVND?: number;
+  scannedLocation?: string;
+  recommendedModels?: string[];
+  reportSent?: boolean;
+}): LeadUser | null {
+  const cleanEmail = input.email.trim().toLowerCase();
+  if (!cleanEmail) return null;
+
+  const baseUser = registerOrUpdateLead({
+    fullName: input.fullName || '',
+    email: cleanEmail,
+    phone: input.phone || '',
+    capitalBudgetMilVND: input.capitalBudgetMilVND,
+    targetArea: input.scannedLocation,
+  });
+
+  const now = new Date().toISOString();
+  const scannedSet = new Set(baseUser.scannedLocations || []);
+  if (input.scannedLocation) scannedSet.add(input.scannedLocation);
+
+  const modelsSet = new Set(baseUser.topRecommendedModels || []);
+  if (input.recommendedModels) {
+    for (const m of input.recommendedModels) {
+      if (m) modelsSet.add(m);
+    }
+  }
+
+  const updated: LeadUser = {
+    ...baseUser,
+    scannedLocations: Array.from(scannedSet).slice(0, 10),
+    topRecommendedModels: Array.from(modelsSet).slice(0, 10),
+    reportSentCount: (baseUser.reportSentCount || 0) + (input.reportSent ? 1 : 0),
+    lastReportSentAt: input.reportSent ? now : baseUser.lastReportSentAt,
+    lastActiveAt: now,
+  };
+
+  const db = getDb();
+  if (!db) {
+    if (!memoryLeads) memoryLeads = new Map<string, LeadUser>();
+    const existing = memoryLeads.get(cleanEmail);
+    memoryLeads.set(cleanEmail, { ...updated, passwordHash: existing?.passwordHash });
+    return updated;
+  }
+
+  db.prepare(
+    'UPDATE users_leads SET payload_json = ?, capital_budget = ?, target_area = ?, last_active_at = ? WHERE email = ?'
+  ).run(
+    JSON.stringify(updated),
+    updated.capitalBudgetMilVND,
+    updated.targetArea,
+    now,
+    cleanEmail
+  );
+
+  return updated;
+}
+
+export function getAllLeadsFromDb(): LeadUser[] {
+  const db = getDb();
+  if (!db) {
+    if (!memoryLeads) return [];
+    return Array.from(memoryLeads.values())
+      .map(({ passwordHash: _ph, ...u }) => u)
+      .sort((a, b) => b.lastActiveAt.localeCompare(a.lastActiveAt));
+  }
+
+  ensureLeadsTable(db);
+
+  const rows = db
+    .prepare('SELECT payload_json FROM users_leads ORDER BY last_active_at DESC LIMIT 500')
+    .all() as { payload_json: string }[];
+
+  return rows.map((r) => JSON.parse(r.payload_json) as LeadUser);
+}
+

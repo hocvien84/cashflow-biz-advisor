@@ -146,3 +146,20 @@ export interface ScoredRecommendation {
   actionPlan: string[];
   warnings: string[];
 }
+
+export interface LeadUser {
+  id: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  passwordHash?: string;
+  capitalBudgetMilVND: number;
+  targetArea: string;
+  scannedLocations: string[];
+  topRecommendedModels: string[];
+  reportSentCount: number;
+  lastReportSentAt?: string;
+  lastActiveAt: string;
+  createdAt: string;
+}
+
