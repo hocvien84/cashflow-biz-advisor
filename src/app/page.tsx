@@ -21,6 +21,7 @@ import {
   POICategory,
 } from '@/types/business';
 import { scoreBusinessModels } from '@/lib/recommendation-engine';
+import { computeVietnamInvestmentMetrics } from '@/lib/investment-metrics';
 import PnLSimulatorCard from '@/components/PnLSimulatorCard';
 import {
   AdminLeadCrmModal,
@@ -334,9 +335,19 @@ export default function CashflowBizAdvisorApp() {
     });
   }, [models, selectedAge, selectedNeed, selectedTierFilter, showMultiNeedOnly]);
 
-  // Count models in each cell of the 8x6 matrix
+  // Count models & compute Vietnam Investment Efficiency metrics (ROI, ROA, Payback, Net Margin) in each cell of the 8x6 matrix
   const cellCounts = useMemo(() => {
-    const counts: Record<string, { total: number; multi: number; avgNetMargin: number }> = {};
+    const counts: Record<
+      string,
+      {
+        total: number;
+        multi: number;
+        avgNetMargin: number;
+        avgRoi: number;
+        avgRoa: number;
+        avgPayback: number;
+      }
+    > = {};
     for (const age of AGE_SEGMENTS) {
       for (const need of MASLOW_NEEDS) {
         const key = `${age.id}__${need.id}`;
@@ -347,17 +358,40 @@ export default function CashflowBizAdvisorApp() {
             (selectedTierFilter === 'all' || m.priceTier === selectedTierFilter) &&
             (!showMultiNeedOnly || m.isMultiNeed)
         );
-        const avgNet =
-          matching.length > 0
-            ? Math.round(
-                matching.reduce((acc, item) => acc + item.pnl.netMarginPercent, 0) / matching.length
-              )
-            : 0;
-        counts[key] = {
-          total: matching.length,
-          multi: matching.filter((x) => x.isMultiNeed).length,
-          avgNetMargin: avgNet,
-        };
+        if (matching.length > 0) {
+          const metricsList = matching.map((item) =>
+            computeVietnamInvestmentMetrics(item.pnl, item.maslowNeeds, item.priceTier)
+          );
+          const avgNet = Math.round(
+            matching.reduce((acc, item) => acc + item.pnl.netMarginPercent, 0) / matching.length
+          );
+          const avgRoi = Math.round(
+            metricsList.reduce((acc, m) => acc + m.roiPercentYear, 0) / metricsList.length
+          );
+          const avgRoa = Math.round(
+            metricsList.reduce((acc, m) => acc + m.roaPercentYear, 0) / metricsList.length
+          );
+          const avgPayback = Math.round(
+            metricsList.reduce((acc, m) => acc + m.paybackMonthsRealistic, 0) / metricsList.length
+          );
+          counts[key] = {
+            total: matching.length,
+            multi: matching.filter((x) => x.isMultiNeed).length,
+            avgNetMargin: avgNet,
+            avgRoi,
+            avgRoa,
+            avgPayback,
+          };
+        } else {
+          counts[key] = {
+            total: 0,
+            multi: 0,
+            avgNetMargin: 0,
+            avgRoi: 0,
+            avgRoa: 0,
+            avgPayback: 0,
+          };
+        }
       }
     }
     return counts;
@@ -674,7 +708,14 @@ export default function CashflowBizAdvisorApp() {
                         {/* 8 Cells in Row */}
                         {AGE_SEGMENTS.map((age) => {
                           const key = `${age.id}__${need.id}`;
-                          const stat = cellCounts[key] || { total: 0, multi: 0, avgNetMargin: 0 };
+                          const stat = cellCounts[key] || {
+                            total: 0,
+                            multi: 0,
+                            avgNetMargin: 0,
+                            avgRoi: 0,
+                            avgRoa: 0,
+                            avgPayback: 0,
+                          };
                           const isSelected = selectedAge === age.id && selectedNeed === need.id;
                           const areaAgeBoost = areaData?.demographics?.ageSegmentScores?.[age.id] || 0;
 
@@ -691,7 +732,7 @@ export default function CashflowBizAdvisorApp() {
                                   : 'hover:bg-slate-800/60'
                               }`}
                             >
-                              <div className="flex items-center justify-between gap-1 mb-1.5">
+                              <div className="flex items-center justify-between gap-1 mb-1">
                                 <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-200">
                                   {stat.total} mô hình
                                 </span>
@@ -705,8 +746,17 @@ export default function CashflowBizAdvisorApp() {
                                 )}
                               </div>
 
-                              <div className="text-[11px] text-emerald-400 font-semibold">
-                                Lãi ròng TB: ~{stat.avgNetMargin}%
+                              <div className="space-y-0.5 mt-1">
+                                <div className="text-[11px] text-emerald-400 font-bold flex items-center justify-between">
+                                  <span>ROI: ~{stat.avgRoi}%/năm</span>
+                                  <span className="text-[10px] text-cyan-300 font-semibold">
+                                    ROA ~{stat.avgRoa}%
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-amber-300 font-medium flex items-center justify-between">
+                                  <span>⏱ Hoàn vốn: ~{stat.avgPayback}th</span>
+                                  <span className="text-slate-400">Ròng ~{stat.avgNetMargin}%</span>
+                                </div>
                               </div>
 
                               {/* Mini price tier dots */}
@@ -775,6 +825,11 @@ export default function CashflowBizAdvisorApp() {
                       {cellModels.map((m) => {
                         const tierMeta = PRICE_TIERS.find((t) => t.id === m.priceTier);
                         const isSelectedCard = activeModelDetail?.id === m.id;
+                        const inv = computeVietnamInvestmentMetrics(
+                          m.pnl,
+                          m.maslowNeeds,
+                          m.priceTier
+                        );
                         return (
                           <div
                             key={m.id}
@@ -809,7 +864,7 @@ export default function CashflowBizAdvisorApp() {
                               <p className="text-xs text-slate-400 line-clamp-2">{m.summary}</p>
 
                               <div className="flex flex-wrap gap-1 pt-1">
-                                {m.exemplarsVN.slice(0, 3).map((ex, idx) => (
+                                {(m.exemplarsVN || []).slice(0, 3).map((ex, idx) => (
                                   <span
                                     key={idx}
                                     className="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-cyan-300 border border-slate-700"
@@ -820,22 +875,29 @@ export default function CashflowBizAdvisorApp() {
                               </div>
                             </div>
 
-                            <div className="pt-3 border-t border-slate-800/80 grid grid-cols-3 gap-2 text-center">
+                            <div className="pt-3 border-t border-slate-800/80 grid grid-cols-4 gap-1.5 text-center">
                               <div className="bg-slate-900 p-1.5 rounded-lg">
-                                <div className="text-[10px] text-slate-400">Doanh thu/th</div>
-                                <div className="text-xs font-bold text-white">{m.pnl.avgMonthlyRevenueVND}Tr</div>
-                              </div>
-                              <div className="bg-slate-900 p-1.5 rounded-lg">
-                                <div className="text-[10px] text-slate-400">Lãi ròng P&L</div>
+                                <div className="text-[10px] text-slate-400">Hiệu suất ROI</div>
                                 <div className="text-xs font-bold text-emerald-400">
-                                  {m.pnl.netMarginPercent}% (~
-                                  {Math.round((m.pnl.avgMonthlyRevenueVND * m.pnl.netMarginPercent) / 100)}Tr)
+                                  ~{inv.roiPercentYear}%/năm
                                 </div>
                               </div>
                               <div className="bg-slate-900 p-1.5 rounded-lg">
-                                <div className="text-[10px] text-slate-400">Vốn CAPEX</div>
+                                <div className="text-[10px] text-slate-400">Hiệu suất ROA</div>
+                                <div className="text-xs font-bold text-cyan-300">
+                                  ~{inv.roaPercentYear}%/năm
+                                </div>
+                              </div>
+                              <div className="bg-slate-900 p-1.5 rounded-lg">
+                                <div className="text-[10px] text-slate-400">Hoàn vốn VN</div>
                                 <div className="text-xs font-bold text-amber-300">
-                                  {m.pnl.initialCapexMinVND}-{m.pnl.initialCapexMaxVND}Tr
+                                  ~{inv.paybackMonthsRealistic} tháng
+                                </div>
+                              </div>
+                              <div className="bg-slate-900 p-1.5 rounded-lg">
+                                <div className="text-[10px] text-slate-400">Dòng tiền ròng</div>
+                                <div className="text-xs font-bold text-white">
+                                  ~{inv.monthlyNetProfitMil}Tr ({m.pnl.netMarginPercent}%)
                                 </div>
                               </div>
                             </div>
@@ -1744,20 +1806,43 @@ export default function CashflowBizAdvisorApp() {
                         </div>
 
                         <div className="flex items-center gap-3">
-                          <div className="text-right text-xs">
-                            <div className="text-slate-400">
-                              Vốn CAPEX:{' '}
-                              <strong className="text-amber-300">
-                                {model.pnl.initialCapexMinVND}-{model.pnl.initialCapexMaxVND} Tr
-                              </strong>
-                            </div>
-                            <div className="text-slate-400">
-                              Lãi ròng chuẩn:{' '}
-                              <strong className="text-emerald-400">
-                                ~{Math.round((model.pnl.avgMonthlyRevenueVND * model.pnl.netMarginPercent) / 100)} Tr/tháng ({model.pnl.netMarginPercent}%)
-                              </strong>
-                            </div>
-                          </div>
+                          {(() => {
+                            const inv = computeVietnamInvestmentMetrics(
+                              model.pnl,
+                              model.maslowNeeds,
+                              model.priceTier
+                            );
+                            return (
+                              <div className="text-right text-xs space-y-0.5">
+                                <div className="text-slate-300 font-semibold">
+                                  ROI:{' '}
+                                  <strong className="text-emerald-400">
+                                    ~{inv.roiPercentYear}%/năm
+                                  </strong>{' '}
+                                  • ROA:{' '}
+                                  <strong className="text-cyan-300">
+                                    ~{inv.roaPercentYear}%/năm
+                                  </strong>
+                                </div>
+                                <div className="text-slate-400">
+                                  Hoàn vốn VN:{' '}
+                                  <strong className="text-amber-300">
+                                    ~{inv.paybackMonthsRealistic} tháng ({inv.paybackRangeText})
+                                  </strong>
+                                </div>
+                                <div className="text-slate-400">
+                                  Vốn CAPEX:{' '}
+                                  <strong className="text-slate-200">
+                                    {model.pnl.initialCapexMinVND}-{model.pnl.initialCapexMaxVND} Tr
+                                  </strong>{' '}
+                                  • Dòng tiền ròng:{' '}
+                                  <strong className="text-emerald-300">
+                                    ~{inv.monthlyNetProfitMil} Tr/th ({model.pnl.netMarginPercent}%)
+                                  </strong>
+                                </div>
+                              </div>
+                            );
+                          })()}
 
                           <button
                             onClick={() =>

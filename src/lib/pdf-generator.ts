@@ -6,6 +6,7 @@ import {
   ScoredRecommendation,
 } from '@/types/business';
 import { AGE_SEGMENTS, MASLOW_NEEDS, PRICE_TIERS } from '@/data/matrix-constants';
+import { computeVietnamInvestmentMetrics } from '@/lib/investment-metrics';
 
 let cachedRegularFontBase64: string | null = null;
 let cachedMediumFontBase64: string | null = null;
@@ -299,12 +300,12 @@ export async function generateAdvisoryPdfBase64(payload: AdvisoryReportPayload):
     doc.roundedRect(margin + 4, y + 14.5, contentWidth - 8, 13, 1.5, 1.5, 'F');
 
     doc.setFont(fontName, 'bold');
-    doc.setFontSize(8.3);
+    doc.setFontSize(8.1);
     doc.setTextColor(5, 150, 105);
-    const netProfitMil = Math.round((m.pnl.avgMonthlyRevenueVND * m.pnl.netMarginPercent) / 100);
+    const inv = computeVietnamInvestmentMetrics(m.pnl, m.maslowNeeds, m.priceTier);
     doc.text(
       txt(
-        `Vốn đầu tư (CAPEX): ${m.pnl.initialCapexMinVND}-${m.pnl.initialCapexMaxVND} Tr | Doanh thu TB: ${m.pnl.avgMonthlyRevenueVND} Tr/tháng | Lãi ròng (Net ${m.pnl.netMarginPercent}%): ~${netProfitMil} Tr/tháng | Hoàn vốn: ${m.pnl.paybackMonthsMin}-${m.pnl.paybackMonthsMax} tháng`
+        `ROI: ~${inv.roiPercentYear}%/năm | ROA: ~${inv.roaPercentYear}%/năm | Hoàn vốn VN: ~${inv.paybackMonthsRealistic} tháng (${inv.paybackRangeText}) | Dòng tiền ròng: ~${inv.monthlyNetProfitMil} Tr/tháng (Lãi ròng ${m.pnl.netMarginPercent}%)`
       ),
       margin + 6,
       y + 19.8
@@ -315,7 +316,7 @@ export async function generateAdvisoryPdfBase64(payload: AdvisoryReportPayload):
     doc.setTextColor(51, 65, 85);
     doc.text(
       txt(
-        `Cấu trúc P&L: Giá vốn (COGS) ${m.pnl.cogsPercent}% • Lãi gộp ${m.pnl.grossMarginPercent}% • Thuê mặt bằng ${m.pnl.rentPercent}% • Nhân sự ${m.pnl.laborPercent}% • OPEX/MKT ${m.pnl.opexMarketingPercent}% • AOV ${m.pnl.averageOrderValueVND}k`
+        `Vốn CAPEX: ${m.pnl.initialCapexMinVND}-${m.pnl.initialCapexMaxVND} Tr (+Cọc 3th & VLĐ ~${inv.depositAndWorkingCapMil} Tr) • Giá vốn ${m.pnl.cogsPercent}% • Thuê MB ${m.pnl.rentPercent}% • Nhân sự ${m.pnl.laborPercent}% • OPEX/Khấu hao ${m.pnl.opexMarketingPercent}%`
       ),
       margin + 6,
       y + 25

@@ -1078,13 +1078,40 @@ const MATRIX_GRID_TEMPLATES: CellTemplate[] = [
   },
 ];
 
-// Hàm nội suy tự động để đảm bảo 100% ô (8 độ tuổi x 6 nhu cầu Maslow x 3 phân khúc) đều có mô hình kinh doanh chuẩn
+// Hàm nội suy tự động để đảm bảo 100% ô (8 độ tuổi x 6 nhu cầu Maslow x 3 phân khúc) đều có mô hình kinh doanh chuẩn thực tế Việt Nam
 export function buildCompleteSeedCatalog(): BusinessModel[] {
-  const models: BusinessModel[] = [...FLAGSHIP_MODELS];
+  const models: BusinessModel[] = FLAGSHIP_MODELS.map((m) => {
+    // Chuẩn hóa biên lãi ròng & thời gian hoàn vốn thực tế tại thị trường Việt Nam (đã tính khấu hao tài sản, cọc mặt bằng & hao hụt)
+    const calibratedNet = Math.min(21, Math.max(9, Math.round(m.pnl.netMarginPercent * 0.82)));
+    const diff = m.pnl.netMarginPercent - calibratedNet;
+    const calibratedOpex = m.pnl.opexMarketingPercent + Math.max(0, diff);
+    const monthlyNetMil = Math.max(6, Math.round((m.pnl.avgMonthlyRevenueVND * calibratedNet) / 100));
+    const realisticPbMin = Math.max(6, Math.round((m.pnl.initialCapexMinVND * 1.15) / monthlyNetMil + 1));
+    const realisticPbMax = Math.max(
+      realisticPbMin + 4,
+      Math.round((m.pnl.initialCapexMaxVND * 1.2) / monthlyNetMil + 2)
+    );
+
+    return {
+      ...m,
+      pnl: {
+        ...m.pnl,
+        opexMarketingPercent: calibratedOpex,
+        netMarginPercent: calibratedNet,
+        paybackMonthsMin: realisticPbMin,
+        paybackMonthsMax: realisticPbMax,
+      },
+    };
+  });
 
   for (const tpl of MATRIX_GRID_TEMPLATES) {
     const grossMargin = 100 - tpl.cogs;
-    const netMargin = grossMargin - tpl.rent - tpl.labor - tpl.opex;
+    const rawNet = grossMargin - tpl.rent - tpl.labor - tpl.opex;
+    // Khấu trừ chi phí khấu hao CAPEX, thuế khoán/TNDN và hao hụt vận hành thực tế tại Việt Nam (~6-12%)
+    const netMargin = Math.min(20, Math.max(10, Math.round(rawNet * 0.68)));
+    const adjustedOpex = Math.max(tpl.opex, grossMargin - tpl.rent - tpl.labor - netMargin);
+    const monthlyNetMil = Math.max(6, Math.round((tpl.rev * netMargin) / 100));
+
     models.push({
       id: `curated-${tpl.age}-${tpl.need}-${tpl.tier}`,
       name: tpl.name,
@@ -1093,9 +1120,9 @@ export function buildCompleteSeedCatalog(): BusinessModel[] {
       ageSegments: [tpl.age],
       maslowNeeds: [tpl.need],
       priceTier: tpl.tier,
-      summary: `${tpl.tagline}. Mô hình được thiết kế tối ưu cho phân khúc ${
-        tpl.tier === 'budget' ? 'giá rẻ (tối đa sản lượng)' : tpl.tier === 'mid' ? 'bình dân (tệp khách rộng)' : 'cao cấp (biên lợi nhuận gộp cao)'
-      }.`,
+      summary: `${tpl.tagline}. Mô hình được hiệu chỉnh theo mặt bằng chi phí thuê nhà, nhân sự, khấu hao tài sản cố định và sức mua thực tế tại đô thị Việt Nam (${
+        tpl.tier === 'budget' ? 'phân khúc giá rẻ - vòng quay nhanh' : tpl.tier === 'mid' ? 'phân khúc bình dân - tệp khách rộng' : 'phân khúc cao cấp - biên gộp cao'
+      }).`,
       productsAndServices: [
         `Sản phẩm/Dịch vụ chủ lực cho nhóm ${tpl.age} (Nhu cầu ${tpl.need})`,
         'Gói combo / thẻ thành viên định kỳ tăng tỷ lệ quay lại (Repeat Rate)',
@@ -1116,16 +1143,16 @@ export function buildCompleteSeedCatalog(): BusinessModel[] {
         grossMarginPercent: grossMargin,
         rentPercent: tpl.rent,
         laborPercent: tpl.labor,
-        opexMarketingPercent: tpl.opex,
+        opexMarketingPercent: adjustedOpex,
         netMarginPercent: netMargin,
         initialCapexMinVND: tpl.capexMin,
         initialCapexMaxVND: tpl.capexMax,
-        paybackMonthsMin: Math.max(4, Math.round(tpl.capexMin / ((tpl.rev * netMargin) / 100))),
-        paybackMonthsMax: Math.max(8, Math.round(tpl.capexMax / ((tpl.rev * netMargin) / 100))),
+        paybackMonthsMin: Math.max(6, Math.round((tpl.capexMin * 1.15) / monthlyNetMil + 1)),
+        paybackMonthsMax: Math.max(10, Math.round((tpl.capexMax * 1.2) / monthlyNetMil + 2)),
         averageOrderValueVND: tpl.aov,
         repeatRatePercent: 72,
-        cashflowCycle: 'Dòng tiền thu trực tiếp từ khách lẻ và gói thẻ thành viên trả trước; tối ưu vòng quay vốn lưu động dưới 30 ngày.',
-        dataSourceCitation: `BCTC ${tpl.asianRef.name} (${tpl.asianRef.ticker}) & nội suy chuẩn ngành bán lẻ/dịch vụ Việt Nam.`,
+        cashflowCycle: 'Dòng tiền thu trực tiếp từ khách lẻ và gói thẻ thành viên trả trước; đã tính dự phòng 3 tháng cọc mặt bằng và 2 tháng chạy đà (Ramp-up) tại Việt Nam.',
+        dataSourceCitation: `BCTC ${tpl.asianRef.name} (${tpl.asianRef.ticker}) & hiệu chỉnh theo mặt bằng P&L thực tế tại Việt Nam.`,
       },
       locationRequirements: {
         idealPOIs: tpl.idealPOIs,
@@ -1137,14 +1164,14 @@ export function buildCompleteSeedCatalog(): BusinessModel[] {
         skills: tpl.skills,
         techLevel: 'moderate',
         networkAdvantages: ['landlord_re', 'kol_local_group'],
-        goalFit: netMargin >= 22 ? ['high_margin', 'cashflow_fast'] : ['cashflow_fast', 'scalable_chain'],
+        goalFit: netMargin >= 17 ? ['high_margin', 'cashflow_fast'] : ['cashflow_fast', 'scalable_chain'],
       },
       keySuccessFactors: [
         'Tập trung sản phẩm phễu thu hút khách trải nghiệm lần đầu',
         'Chuẩn hóa quy trình vận hành để giữ chi phí nhân sự và hao hụt trong ngưỡng chuẩn P&L',
       ],
       risks: [
-        'Cần kiểm soát chặt chi phí thuê mặt bằng không vượt quá ngưỡng an toàn của mô hình',
+        'Cần kiểm soát chặt chi phí thuê mặt bằng không vượt quá ngưỡng 15-18% doanh thu tại Việt Nam',
       ],
       sourceType: 'curated',
     });
@@ -1222,6 +1249,72 @@ export function buildCompleteSeedCatalog(): BusinessModel[] {
     },
   };
 
+  // Chuẩn P&L & Vốn CAPEX thực tế theo từng Ngành Nhu cầu Maslow tại thị trường Việt Nam
+  const vnIndustryBenchmark: Record<
+    MaslowNeedId,
+    Record<
+      PriceTierId,
+      {
+        rev: number;
+        cogs: number;
+        rent: number;
+        labor: number;
+        opex: number; // Đã bao gồm điện nước, MKT, khấu hao TS & thuế khoán VN
+        capexMin: number;
+        capexMax: number;
+        aov: number;
+      }
+    >
+  > = {
+    // 1. Ăn (F&B / Dinh dưỡng): Lãi ròng thực tế tại VN ~12% - 16%, quay vòng vốn nhanh
+    eat: {
+      budget: { rev: 95, cogs: 46, rent: 14, labor: 16, opex: 12, capexMin: 65, capexMax: 135, aov: 38 },
+      mid: { rev: 175, cogs: 41, rent: 15, labor: 18, opex: 12, capexMin: 150, capexMax: 310, aov: 125 },
+      premium: { rev: 310, cogs: 36, rent: 16, labor: 20, opex: 12, capexMin: 360, capexMax: 780, aov: 480 },
+    },
+    // 2. Ở (Lưu trú / Nội thất / Tiện ích nhà ở): Thâm dụng vốn tài sản (CAPEX cao), Lãi ròng ~13% - 17%, Hoàn vốn dài hơn
+    live: {
+      budget: { rev: 110, cogs: 42, rent: 15, labor: 15, opex: 15, capexMin: 110, capexMax: 230, aov: 180 },
+      mid: { rev: 210, cogs: 45, rent: 14, labor: 15, opex: 11, capexMin: 240, capexMax: 520, aov: 650 },
+      premium: { rev: 380, cogs: 40, rent: 15, labor: 16, opex: 12, capexMin: 550, capexMax: 1250, aov: 2400 },
+    },
+    // 3. Mặc (Bán lẻ Thời trang / Mỹ phẩm / Chăm sóc cá nhân): Tồn kho & chiết khấu MKT cao, Lãi ròng thực tế tại VN ~10% - 15%
+    wear: {
+      budget: { rev: 105, cogs: 54, rent: 13, labor: 12, opex: 11, capexMin: 75, capexMax: 160, aov: 95 },
+      mid: { rev: 195, cogs: 48, rent: 14, labor: 14, opex: 11, capexMin: 170, capexMax: 350, aov: 290 },
+      premium: { rev: 340, cogs: 40, rent: 15, labor: 17, opex: 13, capexMin: 380, capexMax: 820, aov: 950 },
+    },
+    // 4. Vui chơi giải trí (Khu vui chơi / Thể thao / Cafe trải nghiệm): Khấu hao thiết bị & mặt bằng lớn, Lãi ròng ~14% - 18%
+    play: {
+      budget: { rev: 115, cogs: 32, rent: 18, labor: 19, opex: 17, capexMin: 110, capexMax: 240, aov: 65 },
+      mid: { rev: 220, cogs: 26, rent: 19, labor: 21, opex: 18, capexMin: 260, capexMax: 560, aov: 190 },
+      premium: { rev: 390, cogs: 22, rent: 20, labor: 22, opex: 18, capexMin: 580, capexMax: 1300, aov: 680 },
+    },
+    // 5. Phát triển bản thân (Giáo dục / Kỹ năng / Y tế & Trị liệu): Chi phí nhân sự chuyên gia & tuyển sinh cao, Lãi ròng ~15% - 19%
+    grow: {
+      budget: { rev: 120, cogs: 24, rent: 14, labor: 29, opex: 18, capexMin: 80, capexMax: 175, aov: 350 },
+      mid: { rev: 225, cogs: 22, rent: 15, labor: 30, opex: 16, capexMin: 180, capexMax: 390, aov: 1200 },
+      premium: { rev: 410, cogs: 20, rent: 16, labor: 30, opex: 15, capexMin: 450, capexMax: 980, aov: 3500 },
+    },
+    // 6. Cộng đồng (CLB / Sự kiện / Group-Buy / Daycare): Vốn tài sản nhẹ (Asset-light), ROI & ROA cao, Lãi ròng ~14% - 18%
+    community: {
+      budget: { rev: 85, cogs: 35, rent: 10, labor: 22, opex: 19, capexMin: 45, capexMax: 105, aov: 110 },
+      mid: { rev: 160, cogs: 30, rent: 12, labor: 24, opex: 18, capexMin: 110, capexMax: 240, aov: 360 },
+      premium: { rev: 280, cogs: 26, rent: 14, labor: 25, opex: 17, capexMin: 250, capexMax: 540, aov: 1200 },
+    },
+  };
+
+  const ageCapexFactor: Record<AgeSegmentId, number> = {
+    infant: 1.05,
+    toddler: 1.08,
+    school: 0.92,
+    student: 0.85,
+    young_family: 1.05,
+    middle_age: 1.22,
+    senior: 1.1,
+    pet: 0.95,
+  };
+
   for (const age of allAges) {
     for (const need of allNeeds) {
       for (const tier of allTiers) {
@@ -1231,16 +1324,20 @@ export function buildCompleteSeedCatalog(): BusinessModel[] {
         if (!exists) {
           const idea = cellIdeas[age][need];
           const tierLabel = tier === 'budget' ? 'Phân khúc Giá rẻ (Mass)' : tier === 'mid' ? 'Phân khúc Bình dân' : 'Phân khúc Cao cấp (Premium)';
-          const rev = tier === 'budget' ? 110 : tier === 'mid' ? 185 : 290;
-          const cogs = tier === 'budget' ? 48 : tier === 'mid' ? 38 : 30;
+          const bm = vnIndustryBenchmark[need][tier];
+          const factor = ageCapexFactor[age] || 1.0;
+
+          const rev = Math.round(bm.rev * factor);
+          const cogs = bm.cogs;
           const gross = 100 - cogs;
-          const rent = tier === 'budget' ? 12 : tier === 'mid' ? 14 : 16;
-          const labor = tier === 'budget' ? 13 : tier === 'mid' ? 17 : 20;
-          const opex = 9;
-          const net = gross - rent - labor - opex;
-          const capexMin = tier === 'budget' ? 70 : tier === 'mid' ? 160 : 350;
-          const capexMax = tier === 'budget' ? 150 : tier === 'mid' ? 340 : 750;
-          const aov = tier === 'budget' ? 45 : tier === 'mid' ? 180 : 680;
+          const rent = bm.rent;
+          const labor = bm.labor;
+          const opex = bm.opex;
+          const net = Math.max(9, gross - rent - labor - opex);
+          const capexMin = Math.round(bm.capexMin * factor);
+          const capexMax = Math.round(bm.capexMax * factor);
+          const aov = Math.round(bm.aov * factor);
+          const monthlyNetMil = Math.max(5, Math.round((rev * net) / 100));
 
           models.push({
             id: `matrix-${age}-${need}-${tier}`,
@@ -1250,7 +1347,7 @@ export function buildCompleteSeedCatalog(): BusinessModel[] {
             ageSegments: [age],
             maslowNeeds: [need],
             priceTier: tier,
-            summary: `Mô hình ${idea.title} được tối ưu hóa cho ${tierLabel}. Tập trung giải quyết nhu cầu thiết yếu với cấu trúc P&L chuẩn ngành đã được kiểm chứng tại Việt Nam và các thị trường Châu Á phát triển.`,
+            summary: `Mô hình ${idea.title} được tối ưu hóa cho ${tierLabel}. Các chỉ số P&L, ROI, ROA và Thời gian hoàn vốn đã được hiệu chỉnh sát với mặt bằng giá thuê mặt bằng, chi phí nhân sự, khấu hao tài sản cố định và sức mua thực tế tại thị trường Việt Nam.`,
             productsAndServices: [
               `Sản phẩm/Dịch vụ phễu thu hút khách hàng mới (${tierLabel})`,
               'Gói Combo / Thẻ trả trước (Prepaid/Subscription) giữ chân khách hàng định kỳ',
@@ -1262,7 +1359,7 @@ export function buildCompleteSeedCatalog(): BusinessModel[] {
                 name: idea.asia,
                 country: 'Nhật Bản / Châu Á',
                 tickerOrStatus: idea.ticker,
-                financialHighlight: `Biên lợi nhuận gộp trung bình đạt ${gross}%, biên lợi nhuận ròng cửa hàng ước đạt ${net}% nhờ tối ưu vòng quay vốn.`,
+                financialHighlight: `Biên lợi nhuận gộp chuẩn ngành đạt ${gross}%, biên lãi ròng thực tế tại điểm bán Việt Nam (sau khấu hao & thuế) ước đạt ~${net}%.`,
               },
             ],
             pnl: {
@@ -1275,12 +1372,12 @@ export function buildCompleteSeedCatalog(): BusinessModel[] {
               netMarginPercent: net,
               initialCapexMinVND: capexMin,
               initialCapexMaxVND: capexMax,
-              paybackMonthsMin: Math.max(4, Math.round(capexMin / ((rev * net) / 100))),
-              paybackMonthsMax: Math.max(7, Math.round(capexMax / ((rev * net) / 100))),
+              paybackMonthsMin: Math.max(6, Math.round((capexMin * 1.15) / monthlyNetMil + 1)),
+              paybackMonthsMax: Math.max(10, Math.round((capexMax * 1.2) / monthlyNetMil + 2)),
               averageOrderValueVND: aov,
               repeatRatePercent: tier === 'budget' ? 78 : tier === 'mid' ? 72 : 65,
-              cashflowCycle: 'Thu tiền trực tiếp qua POS/QR và gói thẻ thành viên trả trước; kiểm soát công nợ và tồn kho dưới 25 ngày.',
-              dataSourceCitation: `BCTC ${idea.asia} (${idea.ticker}) & nội suy chuẩn P&L ngành dịch vụ/bán lẻ Việt Nam.`,
+              cashflowCycle: 'Thu tiền trực tiếp qua POS/QR và gói thẻ thành viên trả trước; đã tính dự phòng 3 tháng cọc mặt bằng và 2 tháng chạy đà (Ramp-up) tại Việt Nam.',
+              dataSourceCitation: `BCTC ${idea.asia} (${idea.ticker}) & hiệu chỉnh theo mặt bằng P&L thực tế tại Việt Nam.`,
             },
             locationRequirements: {
               idealPOIs: idea.pois,

@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { BusinessModel } from '@/types/business';
 import { AGE_SEGMENTS, MASLOW_NEEDS, PRICE_TIERS } from '@/data/matrix-constants';
+import { computeVietnamInvestmentMetrics } from '@/lib/investment-metrics';
 import {
   TrendingUp,
   DollarSign,
@@ -55,7 +56,13 @@ export default function PnLSimulatorCard({ model, onClose }: PnLSimulatorCardPro
     setCustomCapexMil(Math.round((safeCapexMin + safeCapexMax) / 2));
   }, [model?.id, safeRev, safeAov, safeRentPct, safeCapexMin, safeCapexMax]);
 
-  // Calculations
+  const vnMetrics = computeVietnamInvestmentMetrics(
+    model?.pnl,
+    model?.maslowNeeds,
+    model?.priceTier
+  );
+
+  // Calculations (Chuẩn thực tế thị trường Việt Nam: 11 tháng hiệu dụng/năm + Cọc mặt bằng 3 tháng & Vốn lưu động)
   const simMonthlyRevMil = Math.round((dailyOrders * aovThousand * 30) / 1000);
   const simGrossProfitMil = Math.round((simMonthlyRevMil * safeGrossPct) / 100);
   const simLaborMil = Math.round((simMonthlyRevMil * safeLaborPct) / 100);
@@ -63,11 +70,26 @@ export default function PnLSimulatorCard({ model, onClose }: PnLSimulatorCardPro
   const simNetProfitMil = simGrossProfitMil - monthlyRentMil - simLaborMil - simOpexMil;
   const simNetMarginPct =
     simMonthlyRevMil > 0 ? Math.round((simNetProfitMil / simMonthlyRevMil) * 100) : 0;
+
+  const simDepositAndWorkingCapMil = Math.max(
+    15,
+    monthlyRentMil * 3 + Math.round(simMonthlyRevMil * (safeCogsPct / 100) * 0.4)
+  );
+  const simTotalInvestedMil = customCapexMil + Math.round(simDepositAndWorkingCapMil * 0.6);
+  const simTotalAssetsMil = Math.round(simTotalInvestedMil * 1.22);
+  const simAnnualNetProfitMil = simNetProfitMil > 0 ? Math.round(simNetProfitMil * 11) : 0;
+
   const simPaybackMonths =
-    simNetProfitMil > 0 ? (customCapexMil / simNetProfitMil).toFixed(1) : 'Chưa hoàn vốn';
+    simNetProfitMil > 0
+      ? (simTotalInvestedMil / simNetProfitMil + 1.5).toFixed(1)
+      : 'Chưa hoàn vốn';
   const simAnnualRoiPct =
-    customCapexMil > 0 && simNetProfitMil > 0
-      ? Math.round(((simNetProfitMil * 12) / customCapexMil) * 100)
+    simTotalInvestedMil > 0 && simAnnualNetProfitMil > 0
+      ? Math.round((simAnnualNetProfitMil / simTotalInvestedMil) * 100)
+      : 0;
+  const simAnnualRoaPct =
+    simTotalAssetsMil > 0 && simAnnualNetProfitMil > 0
+      ? Math.round((simAnnualNetProfitMil / simTotalAssetsMil) * 100)
       : 0;
 
   const fixedCostMil = monthlyRentMil + Math.round(simLaborMil * 0.7) + Math.round(simOpexMil * 0.5);
@@ -257,32 +279,51 @@ export default function PnLSimulatorCard({ model, onClose }: PnLSimulatorCardPro
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-1">
           <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800">
-            <div className="text-xs text-slate-400">Doanh thu chuẩn / tháng</div>
-            <div className="text-lg font-bold text-white mt-0.5">{safeRev} Triệu</div>
-            <div className="text-[11px] text-emerald-400">Biên gộp: {safeGrossPct}%</div>
-          </div>
-          <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800">
-            <div className="text-xs text-slate-400">Lợi nhuận ròng / tháng</div>
+            <div className="text-xs text-slate-400">Hiệu suất ROI (Vốn ĐT)</div>
             <div className="text-lg font-bold text-emerald-400 mt-0.5">
-              ~{Math.round((safeRev * safeNetPct) / 100)} Triệu
+              ~{vnMetrics.roiPercentYear}% / năm
             </div>
-            <div className="text-[11px] text-slate-300">Net Margin: {safeNetPct}%</div>
+            <div className="text-[11px] text-slate-300">
+              Tổng vốn ĐT: ~{vnMetrics.totalInvestmentMil} Tr
+            </div>
           </div>
           <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800">
-            <div className="text-xs text-slate-400">Vốn đầu tư (CAPEX)</div>
+            <div className="text-xs text-slate-400">Hiệu suất ROA (Tài sản)</div>
+            <div className="text-lg font-bold text-cyan-300 mt-0.5">
+              ~{vnMetrics.roaPercentYear}% / năm
+            </div>
+            <div className="text-[11px] text-slate-300">
+              Tổng tài sản: ~{vnMetrics.totalAssetsMil} Tr
+            </div>
+          </div>
+          <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800">
+            <div className="text-xs text-slate-400">Thời gian hoàn vốn VN</div>
             <div className="text-lg font-bold text-amber-300 mt-0.5">
+              ~{vnMetrics.paybackMonthsRealistic} tháng
+            </div>
+            <div className="text-[11px] text-slate-300">
+              Biên độ: {vnMetrics.paybackRangeText}
+            </div>
+          </div>
+          <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800">
+            <div className="text-xs text-slate-400">Dòng tiền ròng / tháng</div>
+            <div className="text-lg font-bold text-white mt-0.5">
+              ~{vnMetrics.monthlyNetProfitMil} Triệu
+            </div>
+            <div className="text-[11px] text-emerald-400">
+              Lãi ròng chuẩn VN: {safeNetPct}%
+            </div>
+          </div>
+          <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800 col-span-2 sm:col-span-1">
+            <div className="text-xs text-slate-400">CAPEX & Cọc MB (VN)</div>
+            <div className="text-lg font-bold text-indigo-300 mt-0.5">
               {safeCapexMin} - {safeCapexMax} Tr
             </div>
             <div className="text-[11px] text-slate-300">
-              Hoàn vốn: {safePaybackMin}-{safePaybackMax} tháng
+              +Cọc 3th & VLĐ: ~{vnMetrics.depositAndWorkingCapMil} Tr
             </div>
-          </div>
-          <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800">
-            <div className="text-xs text-slate-400">Đơn trung bình (AOV) & Lặp lại</div>
-            <div className="text-lg font-bold text-cyan-300 mt-0.5">{safeAov}.000đ</div>
-            <div className="text-[11px] text-slate-300">Khách quay lại: {safeRepeatPct}%</div>
           </div>
         </div>
 
@@ -397,14 +438,16 @@ export default function PnLSimulatorCard({ model, onClose }: PnLSimulatorCardPro
 
             <div className="p-3 rounded-lg bg-slate-900 border border-slate-800">
               <div className="text-xs text-slate-400 flex items-center gap-1">
-                <Clock className="w-3.5 h-3.5 text-amber-400" /> Thời gian hoàn vốn
+                <Clock className="w-3.5 h-3.5 text-amber-400" /> Hoàn vốn & Hiệu suất Vốn
               </div>
               <div className="text-lg font-bold text-amber-300 mt-1">
                 {typeof simPaybackMonths === 'string' && simPaybackMonths !== 'Chưa hoàn vốn'
                   ? `${simPaybackMonths} tháng`
                   : simPaybackMonths}
               </div>
-              <div className="text-[11px] text-emerald-400 mt-0.5">ROI: ~{simAnnualRoiPct}% / năm</div>
+              <div className="text-[11px] text-emerald-400 mt-0.5 font-semibold">
+                ROI: ~{simAnnualRoiPct}%/năm • ROA: ~{simAnnualRoaPct}%/năm
+              </div>
             </div>
 
             <div className="p-3 rounded-lg bg-slate-900 border border-slate-800">

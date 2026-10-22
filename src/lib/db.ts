@@ -90,31 +90,27 @@ export function getDb(): SqliteDbLike | null {
       );
     `);
 
-    const countRow = db.prepare('SELECT COUNT(*) as cnt FROM business_models').get() as {
-      cnt: number;
-    };
-    if (!countRow || countRow.cnt === 0) {
-      const seedModels = buildCompleteSeedCatalog();
-      const insertStmt = db.prepare(`
-        INSERT OR REPLACE INTO business_models (
-          id, name, is_multi_need, price_tier, age_segments_json, maslow_needs_json, payload_json, source_type, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
+    // Always sync curated models so updated Vietnam market benchmarks (ROI, ROA, Payback, Net Margin) take effect immediately
+    const seedModels = buildCompleteSeedCatalog();
+    const insertStmt = db.prepare(`
+      INSERT OR REPLACE INTO business_models (
+        id, name, is_multi_need, price_tier, age_segments_json, maslow_needs_json, payload_json, source_type, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
 
-      const now = new Date().toISOString();
-      for (const model of seedModels) {
-        insertStmt.run(
-          model.id,
-          model.name,
-          model.isMultiNeed ? 1 : 0,
-          model.priceTier,
-          JSON.stringify(model.ageSegments),
-          JSON.stringify(model.maslowNeeds),
-          JSON.stringify(model),
-          model.sourceType || 'curated',
-          now
-        );
-      }
+    const now = new Date().toISOString();
+    for (const model of seedModels) {
+      insertStmt.run(
+        model.id,
+        model.name,
+        model.isMultiNeed ? 1 : 0,
+        model.priceTier,
+        JSON.stringify(model.ageSegments),
+        JSON.stringify(model.maslowNeeds),
+        JSON.stringify(model),
+        model.sourceType || 'curated',
+        now
+      );
     }
 
     dbInstance = db;
