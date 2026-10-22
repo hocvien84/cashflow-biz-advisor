@@ -392,7 +392,11 @@ export default function CashflowBizAdvisorApp() {
 
   const handleUserAuthenticated = (user: LeadUser) => {
     setCurrentUser(user);
-    localStorage.setItem('CBA_LEAD_USER', JSON.stringify(user));
+    try {
+      localStorage.setItem('CBA_LEAD_USER', JSON.stringify(user));
+    } catch {
+      // ignore storage errors
+    }
     if (user.capitalBudgetMilVND) {
       setIkigai((prev) => ({
         ...prev,
@@ -400,7 +404,24 @@ export default function CashflowBizAdvisorApp() {
       }));
     }
     if (user.targetArea && user.targetArea.trim().length > 2) {
-      setLocationQuery(user.targetArea.trim());
+      const targetQ = user.targetArea.trim();
+      setLocationQuery(targetQ);
+      // Automatically geocode and scan the user's registered targetArea
+      fetch(
+        `/api/geocode?q=${encodeURIComponent(targetQ)}&gmapsKey=${encodeURIComponent(
+          googleMapsApiKey
+        )}&geminiKey=${encodeURIComponent(geminiApiKey)}`
+      )
+        .then((r) => r.json())
+        .then((data) => {
+          const first = data?.results?.[0];
+          if (first && typeof first.lat === 'number' && typeof first.lng === 'number') {
+            setLat(first.lat);
+            setLng(first.lng);
+            triggerAreaScan(first.lat, first.lng, radiusKm, first.name || targetQ, false);
+          }
+        })
+        .catch(() => {});
     }
   };
 
@@ -416,15 +437,18 @@ export default function CashflowBizAdvisorApp() {
 
   if (!authChecked) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-300 flex items-center justify-center text-sm">
-        Đang khởi tạo hệ thống tư vấn...
+      <div
+        className="min-h-screen bg-slate-950 text-slate-300 flex items-center justify-center text-sm notranslate"
+        translate="no"
+      >
+        <span>Đang khởi tạo hệ thống tư vấn...</span>
       </div>
     );
   }
 
   if (!currentUser) {
     return (
-      <>
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col notranslate" translate="no">
         <LeadAuthGate
           onAuthenticated={handleUserAuthenticated}
           onOpenAdmin={() => setShowAdminModal(true)}
@@ -436,12 +460,12 @@ export default function CashflowBizAdvisorApp() {
           smtpConfig={smtpConfig}
           onSaveSmtpConfig={handleSaveSmtpConfig}
         />
-      </>
+      </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col notranslate" translate="no">
       {/* TOP HEADER */}
       <header className="sticky top-0 z-30 backdrop-blur-md bg-slate-950/90 border-b border-slate-800/80 px-4 lg:px-8 py-3.5">
         <div className="max-w-[1600px] mx-auto flex flex-wrap items-center justify-between gap-4">
@@ -652,7 +676,7 @@ export default function CashflowBizAdvisorApp() {
                           const key = `${age.id}__${need.id}`;
                           const stat = cellCounts[key] || { total: 0, multi: 0, avgNetMargin: 0 };
                           const isSelected = selectedAge === age.id && selectedNeed === need.id;
-                          const areaAgeBoost = areaData?.demographics.ageSegmentScores[age.id] || 0;
+                          const areaAgeBoost = areaData?.demographics?.ageSegmentScores?.[age.id] || 0;
 
                           return (
                             <td
@@ -1610,7 +1634,7 @@ export default function CashflowBizAdvisorApp() {
                 <p className="text-xs text-slate-300">
                   📍 <strong>Khu vực mục tiêu:</strong>{' '}
                   {areaData?.locationName || 'Chưa chọn (đang dùng mặc định)'} (Bán kính {radiusKm}km •{' '}
-                  {areaData?.pois.length || 0} điểm POI) &nbsp;|&nbsp; 💰 <strong>Ngân sách vốn:</strong>{' '}
+                  {areaData?.pois?.length || 0} điểm POI) &nbsp;|&nbsp; 💰 <strong>Ngân sách vốn:</strong>{' '}
                   {ikigai.capitalBudgetMilVND} Triệu VNĐ
                 </p>
               </div>

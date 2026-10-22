@@ -74,8 +74,9 @@ export function LeadAuthGate({
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: React.MouseEvent | React.KeyboardEvent) => {
+    if (e) e.preventDefault();
+    if (loading) return;
     setErrorMsg(null);
 
     if (!email.trim() || !email.includes('@')) {
@@ -93,6 +94,11 @@ export function LeadAuthGate({
 
     setLoading(true);
     try {
+      // Blur active input first so browser autofill/password manager detaches cleanly before DOM transition
+      if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+
       const res = await fetch('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -111,11 +117,27 @@ export function LeadAuthGate({
       if (!res.ok || data.error) {
         throw new Error(data.error || 'Không thể xác thực tài khoản.');
       }
-      onAuthenticated(data.user as LeadUser);
+
+      const authedUser = data.user as LeadUser;
+      try {
+        localStorage.setItem('CBA_LEAD_USER', JSON.stringify(authedUser));
+      } catch {
+        // ignore storage quota errors
+      }
+
+      // Defer state transition by 1 frame so browser input/autofill popups close cleanly without crashing DOM
+      setTimeout(() => {
+        onAuthenticated(authedUser);
+      }, 40);
     } catch (err) {
       setErrorMsg((err as Error).message);
-    } finally {
       setLoading(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSubmit(e);
     }
   };
 
@@ -239,7 +261,7 @@ export function LeadAuthGate({
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <div onKeyDown={handleKeyDown} className="p-6 space-y-4">
               <div>
                 <h2 className="text-lg font-bold text-slate-900">
                   {mode === 'register'
@@ -255,7 +277,7 @@ export function LeadAuthGate({
 
               {errorMsg && (
                 <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
-                  ⚠️ {errorMsg}
+                  <span>⚠️ {errorMsg}</span>
                 </div>
               )}
 
@@ -268,7 +290,8 @@ export function LeadAuthGate({
                     <UserCheck className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
                     <input
                       type="text"
-                      required
+                      name="lead_fullname"
+                      autoComplete="off"
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
                       placeholder="VD: Nguyễn Văn An"
@@ -286,7 +309,8 @@ export function LeadAuthGate({
                   <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
                   <input
                     type="email"
-                    required
+                    name="lead_email"
+                    autoComplete="off"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="VD: nguyenvanan@gmail.com"
@@ -304,7 +328,8 @@ export function LeadAuthGate({
                     <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
                     <input
                       type="tel"
-                      required
+                      name="lead_phone"
+                      autoComplete="off"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
                       placeholder="VD: 0901234567"
@@ -316,12 +341,15 @@ export function LeadAuthGate({
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Mật khẩu tài khoản <span className="text-slate-400 font-normal">(Tùy chọn)</span>
+                  Mã bảo mật / Mật khẩu <span className="text-slate-400 font-normal">(Tùy chọn)</span>
                 </label>
                 <div className="relative">
                   <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
                   <input
-                    type="password"
+                    type="text"
+                    name="lead_passcode"
+                    autoComplete="off"
+                    style={{ WebkitTextSecurity: 'disc' } as React.CSSProperties}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Nhập mật khẩu để bảo mật tài khoản..."
@@ -357,6 +385,8 @@ export function LeadAuthGate({
                       <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
                       <input
                         type="text"
+                        name="lead_area"
+                        autoComplete="off"
                         value={targetArea}
                         onChange={(e) => setTargetArea(e.target.value)}
                         placeholder="VD: Cầu Giấy, Hà Nội"
@@ -368,7 +398,8 @@ export function LeadAuthGate({
               )}
 
               <button
-                type="submit"
+                type="button"
+                onClick={handleSubmit}
                 disabled={loading}
                 className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-sm shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer"
               >
@@ -376,13 +407,13 @@ export function LeadAuthGate({
                   <span>Đang khởi tạo hồ sơ tư vấn...</span>
                 ) : mode === 'register' ? (
                   <>
-                    <Sparkles className="w-4 h-4" />
-                    Mở Khóa Công Cụ Tư Vấn & Nhận Báo Cáo PDF
+                    <Sparkles className="w-4 h-4 shrink-0" />
+                    <span>Mở Khóa Công Cụ Tư Vấn & Nhận Báo Cáo PDF</span>
                   </>
                 ) : (
                   <>
-                    <UserCheck className="w-4 h-4" />
-                    Đăng Nhập Vào Hệ Thống
+                    <UserCheck className="w-4 h-4 shrink-0" />
+                    <span>Đăng Nhập Vào Hệ Thống</span>
                   </>
                 )}
               </button>
@@ -391,7 +422,7 @@ export function LeadAuthGate({
                 🔒 Thông tin của bạn được bảo mật và chỉ dùng để gửi File PDF kết quả phân tích mô
                 hình kinh doanh.
               </p>
-            </form>
+            </div>
           </div>
         </div>
       </div>
