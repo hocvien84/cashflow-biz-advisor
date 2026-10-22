@@ -1,0 +1,14 @@
+services:
+  cashflow-biz-advisor:
+    build: .
+    container_name: cashflow-biz-advisor
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
+      - SQLITE_DB_DIR=/app/data
+    volumes:
+      - ./data:/app/data
